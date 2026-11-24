@@ -1,0 +1,19 @@
+## Interface: 16001
+## Title: |cffffd100SkillUp & Profit|r Forever
+## Notes: Level your professions the cheapest way and earn gold doing it: cheapest skill-ups, best profit, mats from bags, one-click AH buying, and where to train next.
+## Author: Marijan
+## X-Curse-Project-ID: 1829015
+## Version: 1.5.0
+## SavedVariables: CheapSkillUpDB
+## OptionalDeps: Auctionator, CraftProfit, TradeSkillMaster
+## IconTexture: Interface\AddOns\SkillUpProfitForever\Icon
+
+Core.lua
+Prices.lua
+Thresholds.lua
+Calculator.lua
+Buyer.lua
+Queue.lua
+Arrow.lua
+UI.lua
+Route.lua

@@ -1,0 +1,69 @@
+# Releases happen on their own: when a push to main carries a "## Version" in SkillUpProfitForever.toc that
+# has no GitHub release yet, this tags it (v1.3.1, ...), builds the addon zip with the BigWigs
+# packager and uploads it to CurseForge (project 1829015, from the .toc) and GitHub Releases.
+# A version that is already released builds nothing. "Run workflow" on the Actions tab does the
+# same check by hand. The packager's output is copied to the run's summary page.
+name: Package and release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag the version in SkillUpProfitForever.toc (if it isn't released yet)
+        id: tag
+        run: |
+          version=$(sed -n 's/^## Version: *//p' SkillUpProfitForever.toc | tr -d '\r' | head -n 1)
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released: nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$CF_API_KEY" ]; then
+            echo "::warning::The CF_API_KEY secret is empty or missing: nothing can be uploaded to CurseForge."
+          fi
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "SkillUp & Profit Forever $version"
+            git push origin "$tag"
+          fi
+          git checkout -q "$tag"
+          echo "new=true" >> "$GITHUB_OUTPUT"
+
+      - name: Package and upload
+        if: steps.tag.outputs.new == 'true'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/BigWigsMods/packager/v2/release.sh -o "$RUNNER_TEMP/release.sh"
+          set +e
+          # (build the tag: started by a push to main, the packager would otherwise wait for a
+          # separate run of the tag, which a tag made inside a workflow never starts)
+          GITHUB_REF="refs/tags/${{ steps.tag.outputs.tag }}" GITHUB_REF_NAME="${{ steps.tag.outputs.tag }}" GITHUB_REF_TYPE=tag \
+            bash "$RUNNER_TEMP/release.sh" 2>&1 | tee "$RUNNER_TEMP/packager.log"
+          status=${PIPESTATUS[0]}
+          {
+            echo "## Packager output (exit code $status)"
+            echo '```'
+            tail -n 80 "$RUNNER_TEMP/packager.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -iE "error|fail|skip|upload|curseforge|game version" "$RUNNER_TEMP/packager.log" | tail -n 15 | while IFS= read -r line; do echo "::notice::$line"; done
+          exit $status
