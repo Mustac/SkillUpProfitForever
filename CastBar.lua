@@ -209,6 +209,19 @@ local function CreateErr()
 	errFrame.text:SetPoint("RIGHT", -10, 0)
 	errFrame.text:SetTextColor(1, 0.85, 0.80)
 	errFrame:SetScale(B:GetScale())
+	errFrame:EnableMouse(true)
+	errFrame:SetScript("OnMouseDown", function(self) self.until_ = nil self:Hide() end)
+	-- fades out on its own
+	errFrame:SetScript("OnUpdate", function(self)
+		if not self.until_ then return end
+		local left = self.until_ - GetTime()
+		if left <= 0 then
+			self.until_ = nil
+			self:Hide()
+		elseif left < 1 then
+			self:SetAlpha(left)
+		end
+	end)
 	errFrame:Hide()
 	return errFrame
 end
@@ -218,24 +231,16 @@ function B:ShowError(msg)
 	e.text:SetText(msg)
 	local w = tonumber(e.text.GetStringWidth and e.text:GetStringWidth()) or 300
 	e:SetWidth(math.max(W + ICON + 60, w + 24))
+	e:SetAlpha(1)
 	e:Show()
-	e.until_ = GetTime() + 6
-	if C_Timer and C_Timer.After then
-		C_Timer.After(6.1, function()
-			if e.until_ and GetTime() >= e.until_ then e:Hide() end
-		end)
-	end
+	e.until_ = GetTime() + 4
 end
 
 -- one place for every crafting error: red box above the bar, red line on the window, and chat
 function CSU:ShowError(msg, ...)
 	if select("#", ...) > 0 then msg = string.format(msg, ...) end
 	B:ShowError(msg)
-	if CSU.UI and CSU.UI.ShowErrorBanner then CSU.UI:ShowErrorBanner(msg) end
 	CSU:Print(CSU:Color(CSU.COLORS.bad, msg))
-	if PlaySound and SOUNDKIT and SOUNDKIT.IG_QUEST_LOG_ABANDON_QUEST then
-		pcall(PlaySound, SOUNDKIT.IG_QUEST_LOG_ABANDON_QUEST)
-	end
 end
 
 -- after we start a craft, the game's own error text (Requires Anvil, Missing reagents...) shows here too

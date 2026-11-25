@@ -2202,8 +2202,14 @@ function UI:CycleLayout()
 	end
 end
 
--- Red line at the top of the window for crafting errors (also shown above the crafting bar)
+-- Errors only show in the red box above the crafting bar (it fades out);
+-- the old red line on the window covered its buttons, so it is gone.
 function UI:ShowErrorBanner(msg)
+	do
+		local f = self.frame
+		if f and type(f.errBanner) == "table" then f.errBanner:Hide() end
+		return
+	end
 	local f = self.frame
 	if not (f and f:IsShown()) then return end
 	local b = f.errBanner
