@@ -312,9 +312,11 @@ local function UpdateScanButton()
 	local b = Prices.scanButton
 	if not b then return end
 	if Prices.running then
-		b:SetText(string.format("Stop (%d)", Prices.pages or 0))
+		b:SetText(tostring(Prices.pages or 0))
+		if b.icon.SetVertexColor then b.icon:SetVertexColor(1, 0.55, 0.45) end
 	else
-		b:SetText("SkillUp Scan")
+		b:SetText("")
+		if b.icon.SetVertexColor then b.icon:SetVertexColor(1, 1, 1) end
 	end
 end
 
@@ -478,33 +480,46 @@ local function StartsRightOf(child, anchor)
 	return ok and hit or false
 end
 
+-- Small square icon buttons on the Auction House's top border, right of the portrait.
+-- b:SetText() shows a small number / word in the corner (scan pages, items to sell...).
+function Prices.MakeAHIcon(name, texture)
+	local house = _G.AuctionHouseFrame
+	local b = CreateFrame("Button", name, house)
+	b:SetSize(22, 22)
+	b:SetFrameLevel((house:GetFrameLevel() or 1) + 30)
+	local bg = b:CreateTexture(nil, "BACKGROUND")
+	bg:SetAllPoints()
+	bg:SetColorTexture(0, 0, 0, 0.85)
+	b.icon = b:CreateTexture(nil, "ARTWORK")
+	b.icon:SetPoint("TOPLEFT", 1, -1)
+	b.icon:SetPoint("BOTTOMRIGHT", -1, 1)
+	b.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	b.icon:SetTexture(texture)
+	local hl = b:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetAllPoints(b.icon)
+	hl:SetColorTexture(1, 1, 1, 0.25)
+	b.badge = b:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+	b.badge:SetPoint("BOTTOMRIGHT", 2, -2)
+	b.SetText = function(self, t) self.badge:SetText(t or "") end
+	b.GetText = function(self) return self.badge:GetText() end
+	b.SetEnabledLook = function(self, on)
+		if self.icon.SetDesaturated then self.icon:SetDesaturated(not on) end
+		self.icon:SetAlpha(on and 1 or 0.55)
+	end
+	b:SetScript("OnLeave", GameTooltip_Hide)
+	return b
+end
+
 function Prices:PlaceScanButton()
-	local b, house = self.scanButton, _G.AuctionHouseFrame
-	if not (b and house) then return end
-	local anchor = house.MoneyFrameBorder
-	b:ClearAllPoints()
-	if not anchor then
-		b:SetPoint("BOTTOMLEFT", house, "BOTTOMLEFT", 200, 4)
-		return
-	end
-	local ok, children = pcall(function() return { house:GetChildren() } end)
-	if ok then
-		for _ = 1, 6 do
-			local nextAnchor
-			for _, child in ipairs(children) do
-				if child ~= b and child ~= anchor and StartsRightOf(child, anchor) then
-					nextAnchor = child
-					break
-				end
-			end
-			if not nextAnchor then break end
-			anchor = nextAnchor
+	local house = _G.AuctionHouseFrame
+	if not house then return end
+	local x = 62
+	for _, b in ipairs({ self.scanButton, self.openButton, CSU.Seller and CSU.Seller.button }) do
+		if b then
+			b:ClearAllPoints()
+			b:SetPoint("TOPLEFT", house, "TOPLEFT", x, -1)
+			x = x + 25
 		end
-	end
-	b:SetPoint("LEFT", anchor, "RIGHT", 8, 0)
-	if self.openButton then
-		self.openButton:ClearAllPoints()
-		self.openButton:SetPoint("LEFT", b, "RIGHT", 4, 0)
 	end
 end
 
@@ -512,9 +527,7 @@ local function CreateScanButton()
 	if Prices.scanButton or not _G.AuctionHouseFrame then return end
 	if CSU.settings and not CSU.settings.showScanButton then return end
 
-	local b = CreateFrame("Button", "CheapSkillUpScanButton", _G.AuctionHouseFrame, "UIPanelButtonTemplate")
-	b:SetSize(130, 22)
-	b:SetText("SkillUp Scan")
+	local b = Prices.MakeAHIcon("CheapSkillUpScanButton", "Interface\\Icons\\INV_Misc_Spyglass_03")
 	b:SetScript("OnClick", function()
 		if Prices.running then
 			Prices:FinishScan(true)
@@ -524,26 +537,24 @@ local function CreateScanButton()
 	end)
 	b:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:AddLine("SkillUp & Profit AH Scan", 1, 0.82, 0)
+		GameTooltip:AddLine(Prices.running and "AH scan running: click to stop" or "SkillUp & Profit AH scan", 1, 0.82, 0)
 		local age = Prices:GetOwnScanAge()
 		GameTooltip:AddLine("Last scan: " .. (age and CSU:FormatAge(age) or "Never"), 1, 1, 1)
 		GameTooltip:AddLine("Items priced: " .. Prices:GetOwnScanCount(), 1, 1, 1)
-		GameTooltip:AddLine("Click to run a full AH browse scan for leveling prices.", 0.7, 0.7, 0.7, true)
+		GameTooltip:AddLine("Click to scan the whole Auction House, so the addon knows today's prices for mats and crafted items.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	b:SetScript("OnLeave", GameTooltip_Hide)
 	Prices.scanButton = b
 
-	local openBtn = CreateFrame("Button", "CheapSkillUpOpenAHButton", _G.AuctionHouseFrame, "UIPanelButtonTemplate")
-	openBtn:SetSize(100, 22)
-	openBtn:SetText("SkillUp & Profit")
+	local openBtn = Prices.MakeAHIcon("CheapSkillUpOpenAHButton", "Interface\\AddOns\\SkillUpProfitForever\\Icon")
 	openBtn:SetScript("OnClick", function()
 		if CSU.UI then CSU.UI:Toggle() end
 	end)
 	openBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:AddLine("Open SkillUp & Profit", 1, 0.82, 0)
-		GameTooltip:AddLine("View cheapest skill-ups and buy materials in one click.", 1, 1, 1, true)
+		GameTooltip:AddLine("Cheapest skill-ups, profit, and one-click buying of the mats.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	openBtn:SetScript("OnLeave", GameTooltip_Hide)

@@ -207,43 +207,38 @@ function S:Update()
 	local list = self:List()
 	local it = list[1]
 	if not it then
-		b:SetText("Sell crafted")
-		b:SetEnabled(false)
+		b.status = nil
+		b:SetText("")
+		b:SetEnabledLook(false)
 		return
 	end
-	b:SetEnabled(true)
+	b:SetEnabledLook(true)
 	local price, why = self:PriceFor(it.itemID)
 	if self.posting then
-		b:SetText("Posting...")
+		b.status = "Posting..."
+		b:SetText("...")
 	elseif why == "scan" then
-		b:SetText(self.checking == it.itemID and "Checking price..." or string.format("Sell crafted (%d)", #list))
+		b.status = self.checking == it.itemID and ("Checking the price of " .. (it.name or "?") .. "...")
+			or ("Next click: check the price of " .. (it.name or "?"))
+		b:SetText(self.checking == it.itemID and "..." or tostring(#list))
 	elseif price then
-		b:SetText(string.format("Post %dx %s", it.count, it.name or "?"))
+		b.status = string.format("Next click: post %dx %s at %s each", it.count, it.name or "?", CSU:FormatMoney(price))
+		b:SetText(tostring(#list))
 	else
-		b:SetText(string.format("Sell crafted (%d)", #list))
+		b.status = nil
+		b:SetText(tostring(#list))
 	end
-	local w = (b.GetFontString and b:GetFontString() and tonumber(b:GetFontString():GetStringWidth())) or 120
-	b:SetWidth(math.max(120, math.min(260, w + 24)))
+	if GameTooltip.IsOwned and GameTooltip:IsOwned(b) and b:GetScript("OnEnter") then b:GetScript("OnEnter")(b) end
 end
 
 local function Place()
-	local b, P = S.button, CSU.Prices
-	local house = _G.AuctionHouseFrame
-	if not (b and house) then return end
-	b:ClearAllPoints()
-	local anchor = P and (P.openButton or P.scanButton)
-	if anchor then
-		b:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
-	else
-		b:SetPoint("BOTTOMLEFT", house, "BOTTOMLEFT", 450, 4)
-	end
+	if CSU.Prices and CSU.Prices.PlaceScanButton then CSU.Prices:PlaceScanButton() end
 end
 
 local function Create()
 	if S.button or not _G.AuctionHouseFrame then return end
-	local b = CreateFrame("Button", "SkillUpProfitSellButton", _G.AuctionHouseFrame, "UIPanelButtonTemplate")
-	b:SetSize(140, 22)
-	b:SetText("Sell crafted")
+	if not (CSU.Prices and CSU.Prices.MakeAHIcon) then return end
+	local b = CSU.Prices.MakeAHIcon("SkillUpProfitSellButton", "Interface\\Icons\\INV_Misc_Coin_02")
 	b:SetScript("OnClick", function(_, mouse)
 		if mouse == "RightButton" or (IsShiftKeyDown and IsShiftKeyDown()) then
 			local it = S:List()[1]
@@ -260,6 +255,7 @@ local function Create()
 	b:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:AddLine("Sell what you crafted", 1, 0.82, 0)
+		if self.status then GameTooltip:AddLine(self.status, 0.4, 0.85, 0.4, true) end
 		local list = S:List()
 		if #list == 0 then
 			GameTooltip:AddLine("Nothing to sell yet. What you craft shows up here.", 1, 1, 1, true)
@@ -276,7 +272,6 @@ local function Create()
 		GameTooltip:AddLine("Right-click (or Shift-click) skips the item. Mats you make for other recipes are left alone.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
-	b:SetScript("OnLeave", GameTooltip_Hide)
 	S.button = b
 	Place()
 	S:Update()
