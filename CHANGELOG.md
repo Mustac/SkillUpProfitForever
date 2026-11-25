@@ -1,5 +1,11 @@
 # SkillUp & Profit Forever
 
+## 1.6.1
+
+- **Simple view**: filters (Can make, the four colours), a search box, and recipes sorted like Blizzard's list (highest level first).
+- Click a recipe in the Simple view to see its mats with have / need, a tick box to use or switch off each one, and the Buy / Make switch for mats you can make.
+- Fixed: switching to the Blizzard profession window no longer leaves it squashed.
+
 ## 1.6.0
 
 - **Make your own mats**: when a recipe needs something you can make yourself (Bolt of Silk Cloth, cured hides, Bronze Tubes, bars from Mining), each such mat gets a **Buy / Make** switch. Make shows the raw mats under it with their own Buy buttons, the Buy button becomes **Make N**, and Craft makes them first. Until you choose, the cheaper way is used.

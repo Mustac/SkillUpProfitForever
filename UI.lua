@@ -3776,6 +3776,9 @@ function UI:ApplyBlizzardWindowMode()
 		pcall(pf.SetScale, pf, blizzScale or 1)
 		pcall(pf.SetAlpha, pf, 1)
 		pf._csuHidden = nil
+		-- it was laid out while tiny: Blizzard has to open it again to draw it right
+		pf._csuNeedsReopen = pf:IsShown() and true or nil
+		if UpdateUIPanelPositions then pcall(UpdateUIPanelPositions, pf) end
 	end
 end
 
@@ -3793,7 +3796,17 @@ function UI:SetWindowMode(m)
 		end
 	else
 		CSU:Print("Profession window: Blizzard.")
-		if not IsBlizzardOpen() then
+		local pfr = _G.ProfessionsFrame
+		if pfr and pfr._csuNeedsReopen and IsBlizzardOpen() and C_TradeSkillUI and C_TradeSkillUI.CloseTradeSkill then
+			-- close and open again at normal size, so Blizzard draws its window properly
+			pfr._csuNeedsReopen = nil
+			local name = CSU.Calc.activeProfession
+			pcall(C_TradeSkillUI.CloseTradeSkill)
+			if pfr:IsShown() and HideUIPanel then pcall(HideUIPanel, pfr) end
+			C_Timer.After(0.2, function()
+				if name then UI:OpenProfession(name) end
+			end)
+		elseif not IsBlizzardOpen() then
 			local name = CSU.Calc.activeProfession
 			if not name then
 				local list = CSU.Calc:GetSidebarProfessions()
@@ -4525,10 +4538,11 @@ function UI.IsSimple()
 	return CSU.settings and CSU.settings.viewMode == "simple"
 end
 
--- how many you can make from what's in your bags
+-- how many you can make from what's in your bags (0 if a mat is switched off)
 local function CanMakeFromBags(e)
 	local n = math.huge
 	for _, r in ipairs(e.reagents or {}) do
+		if not CSU.Calc:IsTicked(r.itemID) then return 0 end
 		n = math.min(n, math.floor(CSU:GetBagCount(r.itemID) / math.max(1, r.qty or 1)))
 	end
 	if n == math.huge then n = 0 end
@@ -4536,8 +4550,9 @@ local function CanMakeFromBags(e)
 end
 
 local function MissingText(e)
-	local parts = {}
+	local parts, off = {}, {}
 	for _, r in ipairs(e.reagents or {}) do
+		if not CSU.Calc:IsTicked(r.itemID) then table.insert(off, r.name or "?") end
 		local have = CSU:GetBagCount(r.itemID)
 		if have < (r.qty or 1) then
 			local where = ""
@@ -4546,6 +4561,7 @@ local function MissingText(e)
 			table.insert(parts, string.format("%dx %s%s", (r.qty or 1) - have, r.name or "?", where))
 		end
 	end
+	if #off > 0 then return "You switched off: " .. table.concat(off, ", ") .. ". Tick it under the recipe to use it." end
 	if #parts == 0 then return "Not enough materials in your bags." end
 	return "Not enough materials in your bags: missing " .. table.concat(parts, ", ")
 end
@@ -4611,23 +4627,73 @@ function UI:CreateCompact()
 	c.title:SetJustifyH("CENTER")
 	if c.title.SetWordWrap then c.title:SetWordWrap(false) end
 
-	-- second line: can-make-only filter + hint
-	local only = MakeFlatButton(c, 120, 18, "Can make only", "default")
+	-- second line: filters (can make, colours) ; third line: search
+	local only = MakeFlatButton(c, 74, 18, "Can make", "default")
 	only:SetPoint("TOPLEFT", 6, -30)
 	only:SetScript("OnClick", function()
 		CSU.settings.compactOnly = not CSU.settings.compactOnly
 		UI:RenderCompact()
 	end)
+	only._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("Only what you can make", 1, 0.82, 0)
+		GameTooltip:AddLine("Hide recipes you have no mats for in your bags.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end
 	c.only = only
+	c.colorBtns = {}
+	local COLORS = { { "optimal", "Orange" }, { "medium", "Yellow" }, { "easy", "Green" }, { "trivial", "Grey" } }
+	local prevBtn = only
+	for _, cd in ipairs(COLORS) do
+		local key, label = cd[1], cd[2]
+		local b = MakeFlatButton(c, 22, 18, "", "default")
+		b:SetPoint("LEFT", prevBtn, "RIGHT", 3, 0)
+		b:SetScript("OnClick", function()
+			CSU.settings.compactHide = CSU.settings.compactHide or {}
+			CSU.settings.compactHide[key] = not CSU.settings.compactHide[key] or nil
+			UI:RenderCompact()
+		end)
+		b._onEnter = function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:AddLine(label .. " recipes", 1, 0.82, 0)
+			GameTooltip:AddLine("Click to show or hide them.", 1, 1, 1, true)
+			GameTooltip:Show()
+		end
+		b.key = key
+		c.colorBtns[key] = b
+		prevBtn = b
+	end
 	c.hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	c.hint:SetPoint("LEFT", only, "RIGHT", 8, 0)
+	c.hint:SetPoint("LEFT", prevBtn, "RIGHT", 6, 0)
 	c.hint:SetPoint("RIGHT", -8, 0)
 	c.hint:SetJustifyH("RIGHT")
-	c.hint:SetText("Shift-click: all")
+	c.hint:SetText("Shift: all")
+
+	local search = MakeFrame("EditBox", nil, c)
+	search:SetPoint("TOPLEFT", 6, -52)
+	search:SetPoint("TOPRIGHT", -6, -52)
+	search:SetHeight(18)
+	search:SetBackdrop(FLAT_BACKDROP)
+	search:SetBackdropColor(unpack((GetTheme()).calcBg))
+	search:SetBackdropBorderColor(unpack(PAL.border))
+	search:SetFontObject(GameFontHighlightSmall)
+	search:SetAutoFocus(false)
+	search:SetTextInsets(6, 6, 0, 0)
+	search:SetScript("OnTextChanged", function(self)
+		c.offset = 0
+		UI:RenderCompact()
+	end)
+	search:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
+	search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	local ph = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	ph:SetPoint("LEFT", 6, 0)
+	ph:SetText("Search recipes...")
+	search.placeholder = ph
+	c.search = search
 
 	-- list
 	local list = CreateFrame("Frame", nil, c)
-	list:SetPoint("TOPLEFT", 6, -54)
+	list:SetPoint("TOPLEFT", 6, -76)
 	list:SetPoint("BOTTOMRIGHT", -6, 18)
 	c.list = list
 	c.rows = {}
@@ -4672,16 +4738,38 @@ local function CompactRow(c, i)
 	r:SetHeight(C_ROW_H)
 	r:SetPoint("TOPLEFT", c.list, "TOPLEFT", 0, -(i - 1) * C_ROW_H)
 	r:SetPoint("TOPRIGHT", c.list, "TOPRIGHT", 0, -(i - 1) * C_ROW_H)
-	local bg = r:CreateTexture(nil, "BACKGROUND")
-	bg:SetAllPoints()
-	bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.035 or 0.012)
+	r.bg = r:CreateTexture(nil, "BACKGROUND")
+	r.bg:SetAllPoints()
 	r.icon = r:CreateTexture(nil, "ARTWORK")
 	r.icon:SetSize(16, 16)
-	r.icon:SetPoint("LEFT", 2, 0)
 	r.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	-- mat rows: tick to use / switch off this mat
+	r.check = CreateFrame("CheckButton", nil, r, "UICheckButtonTemplate")
+	r.check:SetSize(18, 18)
+	r.check:SetPoint("LEFT", 14, 0)
+	r.check:SetScript("OnClick", function(self)
+		if r.itemID then
+			CSU.Calc:SetTicked(r.itemID, self:GetChecked() and true or false)
+			UI:RenderCompact()
+			UI:QueueRefresh()
+		end
+	end)
+	r.check:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:AddLine("Use this mat", 1, 0.82, 0)
+		GameTooltip:AddLine("Untick to switch it off: recipes that need it show 0 and won't be crafted. Same as the tick boxes in the bag list.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	r.check:SetScript("OnLeave", GameTooltip_Hide)
 	r.btn = MakeFlatButton(r, 64, 18, "Craft", "default")
 	r.btn:SetPoint("RIGHT", 0, 0)
 	r.btn:SetScript("OnClick", function(self)
+		if r.kind == "mat" then
+			if r.itemID and r.makeable then
+				CSU.Calc:SetMatChoice(r.itemID, r.how == "make" and "buy" or "make")
+			end
+			return
+		end
 		local e = r.entry
 		if not e then return end
 		local can = CanMakeFromBags(e)
@@ -4697,34 +4785,84 @@ local function CompactRow(c, i)
 	end)
 	r.count = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	r.count:SetPoint("RIGHT", r.btn, "LEFT", -6, 0)
-	r.count:SetWidth(30)
+	r.count:SetWidth(44)
 	r.count:SetJustifyH("RIGHT")
 	r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	r.name:SetPoint("LEFT", r.icon, "RIGHT", 5, 0)
 	r.name:SetPoint("RIGHT", r.count, "LEFT", -4, 0)
 	r.name:SetJustifyH("LEFT")
 	if r.name.SetWordWrap then r.name:SetWordWrap(false) end
+	-- click a recipe: show / hide its mats
+	r:SetScript("OnClick", function(self)
+		if self.kind ~= "recipe" or not self.entry then return end
+		c.expanded = (c.expanded ~= self.entry.recipeID) and self.entry.recipeID or nil
+		UI:RenderCompact()
+	end)
 	r:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		if self.kind == "mat" then
+			if self.itemID and GameTooltip.SetItemByID then GameTooltip:SetItemByID(self.itemID) end
+			GameTooltip:Show()
+			return
+		end
 		local e = self.entry
 		if not e then return end
-		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		if e.outputItemID and GameTooltip.SetItemByID then
 			GameTooltip:SetItemByID(e.outputItemID)
 		else
 			GameTooltip:AddLine(e.name or "?", 1, 0.82, 0)
 		end
-		GameTooltip:AddLine(" ")
-		for _, rg in ipairs(e.reagents or {}) do
-			local have = CSU:GetBagCount(rg.itemID)
-			local ok = have >= (rg.qty or 1)
-			GameTooltip:AddDoubleLine(rg.name or "?", string.format("%d / %d", have, rg.qty or 1),
-				1, 1, 1, ok and 0.3 or 1, ok and 0.85 or 0.4, ok and 0.35 or 0.35)
-		end
+		GameTooltip:AddLine("Click to see its mats.", 0.7, 0.7, 0.7)
 		GameTooltip:Show()
 	end)
 	r:SetScript("OnLeave", GameTooltip_Hide)
 	c.rows[i] = r
 	return r
+end
+
+local function SetupRecipeRow(r, e, i)
+	r.kind, r.entry, r.itemID = "recipe", e, nil
+	r.bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.035 or 0.012)
+	r.check:Hide()
+	r.icon:ClearAllPoints()
+	r.icon:SetPoint("LEFT", 2, 0)
+	r.icon:SetTexture(e.icon or 134400)
+	local _, hex = CSU.Calc:GetDifficultyMeta(e.difficulty)
+	local open = (UI.compact.expanded == e.recipeID)
+	r.name:SetText((open and "- " or "+ ") .. CSU:Color(hex, e.name))
+	local can = e._can
+	r.count:SetText(can > 0 and CSU:Color(CSU.COLORS.good, "x" .. can) or CSU:Color(CSU.COLORS.muted, "0"))
+	local isEnchant = CSU.Enchant and CSU.Enchant:SlotFor(e)
+	r.btn:SetWidth(64)
+	r.btn:SetLabel(isEnchant and "Enchant" or "Craft")
+	r.btn:SetStyle(can > 0 and "gold" or "default")
+	r.btn:Show()
+end
+
+local function SetupMatRow(r, rg)
+	r.kind, r.entry, r.itemID = "mat", nil, rg.itemID
+	r.makeable, r.how = rg.makeable, rg.how
+	r.bg:SetColorTexture(0.95, 0.76, 0.25, 0.05)
+	r.check:Show()
+	local ticked = CSU.Calc:IsTicked(rg.itemID)
+	r.check:SetChecked(ticked)
+	r.icon:ClearAllPoints()
+	r.icon:SetPoint("LEFT", r.check, "RIGHT", 2, 0)
+	local _, _, _, ic = CSU:GetItemInfoSafe(rg.itemID)
+	r.icon:SetTexture(ic or 134400)
+	local name = rg.name or CSU:GetItemName(rg.itemID)
+	r.name:SetText(ticked and name or CSU:Color(CSU.COLORS.muted, name .. " (off)"))
+	local have = CSU:GetBagCount(rg.itemID)
+	local need = rg.qty or 1
+	r.count:SetText(CSU:Color(have >= need and CSU.COLORS.good or CSU.COLORS.bad, string.format("%d/%d", have, need)))
+	if rg.makeable then
+		r.btn:SetWidth(44)
+		r.btn:SetLabel(rg.how == "make" and "Make" or "Buy")
+		r.btn:SetStyle(rg.how == "make" and "gold" or "default")
+		r.btn:Show()
+	else
+		r.btn:Hide()
+	end
 end
 
 function UI:RenderCompact()
@@ -4744,56 +4882,81 @@ function UI:RenderCompact()
 		c.title:SetText(CSU:Color(CSU.COLORS.muted, "No profession yet"))
 	end
 
-	-- what you can make first, then by colour (orange, yellow, green, grey), then A to Z
-	local rows = {}
+	-- filters
+	local only = CSU.settings.compactOnly
+	local hide = CSU.settings.compactHide or {}
+	local text = c.search:GetText()
+	if type(text) ~= "string" then text = "" end
+	c.search.placeholder:SetShown(text == "")
+	local q = text:lower()
+	local skill = prof and prof.skillLevel or 0
+	local recipes = {}
 	for _, e in ipairs(list or {}) do
 		e._can = CanMakeFromBags(e)
-		if not CSU.settings.compactOnly or e._can > 0 then table.insert(rows, e) end
+		local keep = not hide[e.difficulty]
+		if keep and only and e._can <= 0 then keep = false end
+		if keep and q ~= "" and not (e.name or ""):lower():find(q, 1, true) then keep = false end
+		if keep then
+			e._lvl = CSU.Thresholds and CSU.Thresholds:LevelOf(e.recipeID, e.name, skill, e.difficulty) or 0
+			table.insert(recipes, e)
+		end
 	end
-	table.sort(rows, function(a, b)
-		local ca, cb = a._can > 0, b._can > 0
-		if ca ~= cb then return ca end
+	-- like Blizzard: highest level first, then by colour, then A to Z
+	table.sort(recipes, function(a, b)
+		if a._lvl ~= b._lvl then return a._lvl > b._lvl end
 		local da, db = DIFF_ORDER[a.difficulty] or 5, DIFF_ORDER[b.difficulty] or 5
 		if da ~= db then return da < db end
 		return (a.name or "") < (b.name or "")
 	end)
 
-	local only = CSU.settings.compactOnly
-	c.only:SetLabel(only and "Can make only: ON" or "Can make only: OFF")
-	c.only:SetStyle(only and "buy" or "default")
+	-- display lines: recipes, and under the clicked one its mats
+	local lines = {}
+	for _, e in ipairs(recipes) do
+		table.insert(lines, { kind = "recipe", e = e })
+		if c.expanded == e.recipeID then
+			for _, rg in ipairs(e.reagents or {}) do table.insert(lines, { kind = "mat", rg = rg }) end
+		end
+	end
 
-	local fit = math.max(1, math.floor(((tonumber(c.list:GetHeight()) or (CH - 72))) / C_ROW_H))
-	local maxOff = math.max(0, #rows - fit)
+	c.only:SetLabel(only and CSU:Color(CSU.COLORS.good, "Can make") or "Can make")
+	c.only:SetStyle(only and "buy" or "default")
+	local swatch = { optimal = CSU.COLORS.optimal, medium = CSU.COLORS.medium, easy = CSU.COLORS.easy, trivial = CSU.COLORS.trivial }
+	for key, b in pairs(c.colorBtns) do
+		local off = hide[key]
+		b:SetLabel(CSU:Color(off and "4f5666" or swatch[key], off and "o" or "O"))
+		b:SetStyle(off and "default" or "gold")
+	end
+
+	local fit = math.max(1, math.floor(((tonumber(c.list:GetHeight()) or (CH - 94))) / C_ROW_H))
+	local maxOff = math.max(0, #lines - fit)
 	if (c.offset or 0) > maxOff then c.offset = maxOff end
 	local off = c.offset or 0
+	local ri = 0
 	for i = 1, math.max(fit, #c.rows) do
-		local e = (i <= fit) and rows[off + i] or nil
+		local ln = (i <= fit) and lines[off + i] or nil
 		local r = (i <= fit) and CompactRow(c, i) or c.rows[i]
-		if e and r then
-			r.entry = e
-			r.icon:SetTexture(e.icon or 134400)
-			local _, hex = CSU.Calc:GetDifficultyMeta(e.difficulty)
-			r.name:SetText(CSU:Color(hex, e.name))
-			local can = e._can
-			r.count:SetText(can > 0 and CSU:Color(CSU.COLORS.good, "x" .. can) or CSU:Color(CSU.COLORS.muted, "0"))
-			local isEnchant = CSU.Enchant and CSU.Enchant:SlotFor(e)
-			r.btn:SetLabel(isEnchant and "Enchant" or "Craft")
-			r.btn:SetStyle(can > 0 and "gold" or "default")
+		if ln and r then
+			if ln.kind == "recipe" then
+				ri = ri + 1
+				SetupRecipeRow(r, ln.e, ri)
+			else
+				SetupMatRow(r, ln.rg)
+			end
 			r:Show()
 		elseif r then
-			r.entry = nil
+			r.entry, r.itemID = nil, nil
 			r:Hide()
 		end
 	end
-	if #rows == 0 then
-		c.empty:SetText(only and "Nothing you can make from your bags right now." or "No recipes yet: open this profession once.")
+	if #recipes == 0 then
+		c.empty:SetText((only or q ~= "" or next(hide)) and "Nothing matches your filters." or "No recipes yet: open this profession once.")
 		c.empty:Show()
 	else
 		c.empty:Hide()
 	end
 	local canCount = 0
-	for _, e in ipairs(rows) do if e._can > 0 then canCount = canCount + 1 end end
-	c.foot:SetText(string.format("%d recipes, %d you can make", #rows, canCount))
+	for _, e in ipairs(recipes) do if e._can > 0 then canCount = canCount + 1 end end
+	c.foot:SetText(string.format("%d recipes, %d you can make", #recipes, canCount))
 end
 
 function UI:CompactSwitchProf(step)

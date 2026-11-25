@@ -246,6 +246,12 @@ function Thresholds:GetForRecipe(recipeID, recipeName, currentSkill, diffKey)
 	}
 end
 
+-- How high a recipe is, for sorting like Blizzard (highest first): the skill where it turns grey.
+function Thresholds:LevelOf(recipeID, recipeName, currentSkill, diffKey)
+	local t = self:GetForRecipe(recipeID, recipeName, currentSkill, diffKey)
+	return t and t.gray or 0
+end
+
 -- Colour of a recipe at a given skill, from learned exact values or the seed table.
 -- Returns "optimal" | "medium" | "easy" | "trivial", or nil when nothing is known.
 function Thresholds:DifficultyAt(recipeID, recipeName, skill)

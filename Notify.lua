@@ -8,6 +8,12 @@ CSU.Notify = N
 
 -- What changed, newest first. Short lines a player understands.
 N.CHANGES = {
+	["1.6.1"] = {
+		"Simple view: filters (Can make, the four colours) and a search box.",
+		"Simple view: click a recipe to see its mats, how many you have, and tick or untick each one. A mat you untick counts as off: recipes that need it show 0.",
+		"Simple view: sorted like Blizzard's list, highest level first.",
+		"Switching to the Blizzard profession window no longer leaves it squashed.",
+	},
 	["1.6.0"] = {
 		"Make your own mats: when a recipe needs something you can make yourself (Bolt of Silk Cloth, cured hides, Bronze Tubes, bars from Mining), each mat has a Buy / Make switch. Make shows the raw mats under it with their own Buy buttons, and Craft makes them first.",
 		"Making those mats counts toward your skill points in the cost per point.",

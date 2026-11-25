@@ -3,7 +3,7 @@
 ## Notes: Level your professions the cheapest way and earn gold doing it: cheapest skill-ups, best profit, mats from bags, one-click AH buying, and where to train next.
 ## Author: Marijan
 ## X-Curse-Project-ID: 1829015
-## Version: 1.6.0
+## Version: 1.6.1
 ## SavedVariables: CheapSkillUpDB
 ## OptionalDeps: Auctionator, CraftProfit, TradeSkillMaster
 ## IconTexture: Interface\AddOns\SkillUpProfitForever\Icon

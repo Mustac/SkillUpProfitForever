@@ -6,7 +6,7 @@ _G.CheapSkillUp = CSU
 
 CSU.name = ADDON_NAME
 CSU.CALLER_ID = ADDON_NAME
-CSU.version = "1.6.0"
+CSU.version = "1.6.1"
 
 CSU.DEFAULTS = {
 	showOptimal = true,          -- Red/Orange (guaranteed skill-up)
