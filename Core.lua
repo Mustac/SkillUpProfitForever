@@ -34,7 +34,7 @@ CSU.DEFAULTS = {
 	ahHours = 8,                 -- auction length used for the AH deposit: 2, 8 or 24 hours
 	arrow = true,                -- show our own arrow to the pinned trainer / next route stop
 	arrowPoint = nil,            -- saved position for the arrow
-	theme = "dark",              -- dark | blizzard | parchment | emerald
+	theme = "graphite",          -- graphite | dark (Midnight) | blizzard | royal | parchment | emerald | crimson | arcane
 }
 
 CSU.COLORS = {
@@ -264,6 +264,11 @@ local function InitDB()
 		end
 	end
 	CSU.settings = CSU.db.settings
+	-- once: the near-black Midnight default becomes the dark grey Graphite (Midnight stays pickable)
+	if not CSU.settings.graphiteDefault then
+		if CSU.settings.theme == "dark" then CSU.settings.theme = "graphite" end
+		CSU.settings.graphiteDefault = true
+	end
 	CSU.db.realms = CSU.db.realms or {}
 	CSU.db.vendor = CSU.db.vendor or {}
 	CSU.db.chars = CSU.db.chars or {}

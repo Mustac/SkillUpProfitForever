@@ -91,9 +91,40 @@ local CARVED_BACKDROP = {
 	insets = { left = 4, right = 4, top = 4, bottom = 4 },
 }
 
-local THEME_CYCLE = { "dark", "blizzard", "royal", "parchment", "emerald", "crimson", "arcane" }
+local THEME_CYCLE = { "graphite", "dark", "blizzard", "royal", "parchment", "emerald", "crimson", "arcane" }
 
 local THEMES = {
+	-- Dark grey (not black): neutral graphite panels, gold accents
+	graphite = {
+		label = "Graphite",
+		desc = "Dark grey panels (not black) with gold accents.",
+		mainBackdrop = FLAT_BACKDROP,
+		cardBackdrop = FLAT_BACKDROP,
+		inset = 1,
+		bg = { 0.135, 0.138, 0.146, 1.00 },
+		header = { 0.165, 0.168, 0.178, 1.00 },
+		headerLine = { 0.720, 0.560, 0.220, 0.75 },
+		sidebar = { 0.150, 0.153, 0.162, 1.00 },
+		card = { 0.180, 0.183, 0.194, 1.00 },
+		cardBorder = { 0.300, 0.520, 0.350, 1.00 },
+		calcBg = { 0.145, 0.148, 0.157, 1.00 },
+		calcBorder = { 0.280, 0.288, 0.305, 1.00 },
+		border = { 0.300, 0.308, 0.328, 1.00 },
+		borderGold = { 0.720, 0.560, 0.220, 1.00 },
+		btnBg = { 0.225, 0.230, 0.244, 1.00 },
+		btnHover = { 0.290, 0.297, 0.315, 1.00 },
+		btnDisabled = { 0.170, 0.173, 0.183, 1.00 },
+		profActiveBg = { 0.245, 0.240, 0.215, 1.00 },
+		profActiveBorder = { 0.720, 0.560, 0.220, 1.00 },
+		profIdleBg = { 0.175, 0.178, 0.188, 1.00 },
+		profIdleBorder = { 0.285, 0.292, 0.310, 1.00 },
+		profHoverBg = { 0.215, 0.220, 0.233, 1.00 },
+		barBg = { 0.100, 0.102, 0.108, 1.00 },
+		barFillActive = { 0.950, 0.760, 0.250, 1.00 },
+		barFillIdle = { 0.460, 0.490, 0.550, 1.00 },
+		accent = { 0.950, 0.760, 0.250, 1.00 },
+		thumb = { 0.580, 0.480, 0.250, 1.00 },
+	},
 	dark = {
 		label = "Midnight",
 		desc = "Sleek 1px flat dark slate with gold accents.",
@@ -307,8 +338,8 @@ local THEMES = {
 }
 
 local function GetTheme()
-	local key = CSU.settings and CSU.settings.theme or "dark"
-	return THEMES[key] or THEMES.dark, THEMES[key] and key or "dark"
+	local key = CSU.settings and CSU.settings.theme or "graphite"
+	return THEMES[key] or THEMES.graphite, THEMES[key] and key or "graphite"
 end
 
 -- Palette (updated dynamically by UI:ApplyTheme)
@@ -452,8 +483,8 @@ local function CreateDiffPill(parent, text, hexColor, settingKey)
 			self.label:SetTextColor(cr, cg, cb)
 			self.dot:SetAlpha(1)
 		else
-			self:SetBackdropColor(0.09, 0.10, 0.13, 1)
-			self:SetBackdropBorderColor(0.20, 0.22, 0.27, 1)
+			self:SetBackdropColor(unpack(PAL.btnDisabled))
+			self:SetBackdropBorderColor(unpack(PAL.border))
 			self.label:SetTextColor(0.50, 0.53, 0.58)
 			self.dot:SetAlpha(0.35)
 		end
@@ -802,7 +833,7 @@ function UI:CreateMainFrame()
 	op:SetPoint("TOPRIGHT", optsBtn, "BOTTOMRIGHT", 0, -4)
 	op:SetFrameLevel((f:GetFrameLevel() or 1) + 60)
 	op:SetBackdrop(FLAT_BACKDROP)
-	op:SetBackdropColor(0.06, 0.07, 0.10, 0.98)
+	op:SetBackdropColor(PAL.bg[1], PAL.bg[2], PAL.bg[3], 0.98)
 	op:SetBackdropBorderColor(unpack(PAL.borderGold))
 	op:EnableMouse(true)
 	op:Hide()
@@ -2130,6 +2161,25 @@ function UI:ApplyTheme()
 		self.bagPanel:SetBackdropColor(unpack(th.sidebar))
 		if self.bagPanel.edge then
 			self.bagPanel.edge:SetColorTexture(unpack(th.border))
+		end
+	end
+
+	if f and f.optsPanel then
+		f.optsPanel:SetBackdropColor(th.bg[1], th.bg[2], th.bg[3], 0.98)
+		f.optsPanel:SetBackdropBorderColor(unpack(th.borderGold))
+	end
+	if f and f.profBar then
+		f.profBar:SetBackdropColor(unpack(th.sidebar))
+	end
+	local q = self.queueFrame
+	if q then
+		q:SetBackdropColor(unpack(th.bg))
+		q:SetBackdropBorderColor(unpack(th.borderGold))
+		for _, r in ipairs(q.craftRows or {}) do
+			if r.countEdit then
+				r.countEdit:SetBackdropColor(unpack(th.calcBg))
+				r.countEdit:SetBackdropBorderColor(unpack(th.border))
+			end
 		end
 	end
 
@@ -3787,8 +3837,8 @@ function UI:CreateQueueFrame()
 		eb:SetSize(40, 20)
 		eb:SetPoint("RIGHT", prev, "LEFT", -3, 0)
 		eb:SetBackdrop(FLAT_BACKDROP)
-		eb:SetBackdropColor(0.05, 0.06, 0.08, 1)
-		eb:SetBackdropBorderColor(0.30, 0.34, 0.42, 1)
+		eb:SetBackdropColor(unpack((GetTheme()).calcBg))
+		eb:SetBackdropBorderColor(unpack(PAL.border))
 		eb:SetFontObject(GameFontHighlight)
 		eb:SetJustifyH("CENTER")
 		eb:SetAutoFocus(false)
