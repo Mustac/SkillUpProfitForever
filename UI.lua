@@ -1548,7 +1548,10 @@ function UI:CreateMainFrame()
 			return
 		end
 		if self.recipeID and self.craftQty and self.craftQty > 0 then
-			CraftRecipeFromWindow(self.recipeID, self.craftQty)
+			local n = self.craftQty
+			local all = tonumber(self.craftAllQty) or 0
+			if IsShiftKeyDown and IsShiftKeyDown() and all > n then n = all end
+			CraftRecipeFromWindow(self.recipeID, n)
 		end
 	end)
 	craftBtn._onEnter = function(self)
@@ -1570,6 +1573,9 @@ function UI:CreateMainFrame()
 		GameTooltip:AddLine("Craft Directly", 1, 0.82, 0)
 		if self.craftQty and self.craftQty > 0 then
 			GameTooltip:AddLine(string.format("Crafts %dx using materials in your bags.", self.craftQty), 1, 1, 1, true)
+			if (tonumber(self.craftAllQty) or 0) > self.craftQty then
+				GameTooltip:AddLine(string.format("Shift-click: craft all %d your bags have mats for.", self.craftAllQty), 0.4, 0.85, 0.4, true)
+			end
 			GameTooltip:AddLine("If the profession window isn't open yet, the first click opens it and the second starts crafting.", 0.7, 0.7, 0.7, true)
 		else
 			GameTooltip:AddLine("Buy or gather the required materials first.", 0.75, 0.75, 0.75)
@@ -1582,6 +1588,10 @@ function UI:CreateMainFrame()
 	local buyNextBtn = MakeFlatButton(card, 152, 26, "Buy Next Mat", "buy")
 	buyNextBtn:SetPoint("RIGHT", craftBtn, "LEFT", -6, 0)
 	buyNextBtn:SetScript("OnClick", function(self)
+		if tonumber(self.craftAllQty) and self.craftAllRecipe then
+			CraftRecipeFromWindow(self.craftAllRecipe, self.craftAllQty)
+			return
+		end
 		if self.targetItemID and self.targetQty and self.targetQty > 0 then
 			CSU.Buyer:ClickBuy(self.targetItemID, self.targetQty)
 			UI:Refresh()
@@ -3007,6 +3017,7 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 		card.btnToGreen:SetEnabledStyled(false, "default")
 		card.btnToGreen:SetLabel("To Green")
 		card.buyNextBtn:SetEnabledStyled(false, "default")
+		card.buyNextBtn.craftAllQty, card.buyNextBtn.craftAllRecipe = nil, nil
 		card.buyNextBtn:SetLabel("Nothing to Buy")
 		card.craftBtn:SetEnabledStyled(false, "default")
 		card.craftBtn:SetLabel("Craft")
@@ -3266,9 +3277,11 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	-- Craft button: enchants go on an item; mats you make come first; else craft
 	if craftableNow == math.huge then craftableNow = 0 end
 	local toCraft = math.min(crafts, craftableNow)
+	local enchantInfoEarly = CSU.Enchant and CSU.Enchant:SlotFor(entry)
 	local cb = card.craftBtn
 	cb.recipeID = entry.recipeID
 	cb.craftQty = toCraft
+	cb.craftAllQty = (not enchantInfoEarly) and craftableNow or nil
 	cb.makeRecipeID, cb.makeQty, cb.makeName, cb.enchantEntry = nil, nil, nil, nil
 	cb.missingText = #missingParts > 0 and ("Not enough materials in your bags: missing " .. table.concat(missingParts, ", ")) or nil
 	local enchantInfo = CSU.Enchant and CSU.Enchant:SlotFor(entry)
@@ -3365,6 +3378,7 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 		card.sub:SetText(CSU:Color(CSU.COLORS.warn, "Some reagent prices missing — run an AH scan"))
 	end
 
+	card.buyNextBtn.craftAllQty, card.buyNextBtn.craftAllRecipe = nil, nil
 	if nextItemID and nextNeed and nextNeed > 0 then
 		card.buyNextBtn.targetItemID = nextItemID
 		card.buyNextBtn.targetQty = nextNeed
@@ -3400,6 +3414,15 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	else
 		card.buyNextBtn.targetItemID = nil
 		card.buyNextBtn.targetQty = nil
+		local cb2 = card.craftBtn
+		local allN = cb2 and tonumber(cb2.craftAllQty)
+		if not vendorNeeded and allN and allN > (tonumber(cb2.craftQty) or 0)
+			and type(cb2.makeRecipeID) ~= "number" and type(cb2.enchantEntry) ~= "table" then
+			card.buyNextBtn.craftAllQty, card.buyNextBtn.craftAllRecipe = allN, cb2.recipeID
+			card.buyNextBtn:SetLabel(string.format("Craft all (%d)", allN))
+			card.buyNextBtn:SetEnabledStyled(true, "gold")
+			return
+		end
 		if vendorNeeded then
 			card.buyNextBtn:SetLabel(CSU:Color(CSU.COLORS.vendor, "Buy rest at a vendor"))
 		else

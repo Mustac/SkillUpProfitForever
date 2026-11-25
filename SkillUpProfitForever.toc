@@ -14,6 +14,7 @@ Thresholds.lua
 Calculator.lua
 Buyer.lua
 Queue.lua
+Seller.lua
 Enchant.lua
 CastBar.lua
 Notify.lua
