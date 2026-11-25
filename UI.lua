@@ -3278,6 +3278,7 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	local toCraft = math.min(crafts, craftableNow)
 	local enchantInfoEarly = CSU.Enchant and CSU.Enchant:SlotFor(entry)
 	local cb = card.craftBtn
+	cb:SetWidth(84)
 	cb.recipeID = entry.recipeID
 	cb.craftQty = toCraft
 	cb.craftAllQty = (not enchantInfoEarly) and craftableNow or nil
@@ -3417,9 +3418,15 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 		local allN = cb2 and tonumber(cb2.craftAllQty)
 		if not vendorNeeded and allN and allN > (tonumber(cb2.craftQty) or 0)
 			and type(cb2.makeRecipeID) ~= "number" and type(cb2.enchantEntry) ~= "table" then
-			card.buyNextBtn.craftAllQty, card.buyNextBtn.craftAllRecipe = allN, cb2.recipeID
-			card.buyNextBtn:SetLabel(string.format("Craft all (%d)", allN))
-			card.buyNextBtn:SetEnabledStyled(true, "gold")
+			-- Craft all on the right (the gold button), Craft xN on the left
+			local single = tonumber(cb2.craftQty) or 1
+			cb2.craftQty = allN
+			cb2:SetWidth(allN >= 100 and 118 or 108)
+			cb2:SetLabel(string.format("Craft all (%d)", allN))
+			cb2:SetEnabledStyled(true, "gold")
+			card.buyNextBtn.craftAllQty, card.buyNextBtn.craftAllRecipe = single, cb2.recipeID
+			card.buyNextBtn:SetLabel("Craft x" .. single)
+			card.buyNextBtn:SetEnabledStyled(true, "default")
 			return
 		end
 		if vendorNeeded then

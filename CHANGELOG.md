@@ -1,5 +1,16 @@
 # SkillUp & Profit Forever
 
+## 1.6.2
+
+- **Craft all**: the recipe card's gold button crafts everything your bags have mats for, with Craft x1 on its left. The Craft Queue button is now Craft all (N).
+- Crafting from the queue or the Simple view opens the profession out of sight: no Blizzard window and no big addon window popping up.
+- **One window at a time**: Blizzard's profession window or SkillUp & Profit. A SkillUp & Profit button on Blizzard's title bar and a Blizzard Window button in the addon switch between them.
+- **Mats From Bank** button next to Mats From Bags (same switch as Count bank items).
+- **Sell crafted** on the Auction House: posts what you crafted, 1 silver under the cheapest other seller. Mats you make for other recipes, soulbound items and things worth more at a vendor are left alone. Right-click skips an item.
+- Auction House buttons are now small icons on the top border, with hover explanations.
+- Errors: only the red box above the crafting bar, fading out after 4 seconds, no sound.
+- The crafting bar shows the made item's icon (the game gave crafts the WoW logo).
+
 ## 1.6.1
 
 - **Simple view**: filters (Can make, the four colours), a search box, and recipes sorted like Blizzard's list (highest level first).

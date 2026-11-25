@@ -8,6 +8,16 @@ CSU.Notify = N
 
 -- What changed, newest first. Short lines a player understands.
 N.CHANGES = {
+	["1.6.2"] = {
+		"Craft all: the recipe card's gold button crafts everything your bags have mats for (Craft x1 sits on its left). The Craft Queue button is Craft all too.",
+		"Crafting from the queue or the Simple view no longer pops up Blizzard's window or the big addon window.",
+		"Blizzard's window or this one: only one is on screen. A SkillUp & Profit button on Blizzard's window and a Blizzard Window button here switch between them.",
+		"Mats From Bank: a new button next to Mats From Bags. Your bank counts as yours too.",
+		"Sell crafted: a coin icon on the Auction House posts what you crafted, 1 silver under the cheapest seller (one click checks the price, the next posts).",
+		"The Auction House buttons are now small icons on the top border. Hover them to see what they do.",
+		"Errors only show in the red box above the crafting bar, fade out after 4 seconds, and make no sound.",
+		"The crafting bar shows the item you're making instead of the WoW logo.",
+	},
 	["1.6.1"] = {
 		"Simple view: filters (Can make, the four colours) and a search box.",
 		"Simple view: click a recipe to see its mats, how many you have, and tick or untick each one. A mat you untick counts as off: recipes that need it show 0.",
