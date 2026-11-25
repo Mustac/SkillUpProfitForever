@@ -139,8 +139,42 @@ function B:Fail(reason)
 end
 
 -- we asked to craft n: the bar counts them down
-function B:Expect(n)
+local expectIcon, expectIconAt
+function B:Expect(n, recipeID)
 	expect = (n and n > 1) and n or nil
+	expectIcon = recipeID and B.IconForRecipe(recipeID) or nil
+	expectIconAt = GetTime and GetTime() or 0
+end
+
+-- The game gives crafts a WoW-logo icon on Forever: use the made item's icon instead
+local function IconOfRec(rec)
+	if not rec then return nil end
+	if rec.outputItemID then
+		local _, _, _, ic = CSU:GetItemInfoSafe(rec.outputItemID)
+		if ic then return ic end
+	end
+	return rec.icon
+end
+function B.IconForRecipe(recipeID)
+	local char = CSU.db and CSU:GetCharDB()
+	for _, prof in pairs(char and char.professions or {}) do
+		local rec = prof.recipes and prof.recipes[recipeID]
+		if rec then return IconOfRec(rec) end
+		for _, r in pairs(prof.recipes or {}) do
+			if r.recipeID == recipeID then return IconOfRec(r) end
+		end
+	end
+	return nil
+end
+function B.IconForName(name)
+	local char = CSU.db and CSU:GetCharDB()
+	if not name then return nil end
+	for _, prof in pairs(char and char.professions or {}) do
+		for _, r in pairs(prof.recipes or {}) do
+			if r.name == name then return IconOfRec(r) end
+		end
+	end
+	return nil
 end
 
 -- shows the bar for a while so you can drag it or see its size
@@ -261,7 +295,11 @@ CSU:RegisterEvent("UNIT_SPELLCAST_START", function(_, unit)
 		local ok, n = pcall(C_TradeSkillUI.GetRemainingRecasts)
 		if ok and type(n) == "number" and n > 0 then remaining = n + 1 end
 	end
-	B:Start(name, texture, startMS, endMS)
+	local icon = B.IconForName(name)
+	if not icon and expectIcon and expectIconAt and (GetTime() - expectIconAt) < 3 then icon = expectIcon end
+	if not icon and cast and cast.name == name then icon = cast.icon end
+	expectIcon = nil
+	B:Start(name, icon or texture, startMS, endMS)
 end)
 CSU:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED", function(_, unit)
 	if unit == "player" and cast then B:Done() end

@@ -584,7 +584,7 @@ local function CraftRecipeFromWindow(recipeID, count)
 		return false
 	end
 	if CSU.CastBar then
-		CSU.CastBar:Expect(count)
+		CSU.CastBar:Expect(count, recipeID)
 		CSU.CastBar:WatchErrors(3)
 	end
 	if T.CraftRecipe then
