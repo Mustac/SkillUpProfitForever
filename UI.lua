@@ -574,7 +574,7 @@ local function CraftRecipeFromWindow(recipeID, count)
 			local ok = pcall(T.CraftRecipe, recipeID, count)
 			if ok then return true end
 		end
-		CSU:Print("Opened profession to recipe — click Craft again to start crafting!")
+		CSU:ShowError("Getting %s ready: click again to craft.", (liveInfo and liveInfo.name) or "the profession")
 		return false
 	end
 
@@ -3784,6 +3784,18 @@ end
 local blizzHooked = false
 local blizzScale
 
+-- Crafting from the queue / Simple view opens the profession out of sight: no Blizzard
+-- window and no big addon window popping up. Stays hidden until that profession closes.
+local function Now() return GetTime and GetTime() or 0 end
+local function IsQuiet()
+	return (UI.quietUntil or 0) > Now()
+end
+function UI:BeginQuiet(seconds)
+	local pf = _G.ProfessionsFrame
+	if pf and pf:IsShown() and not pf._csuHidden then return end -- you have it open: leave it
+	self.quietUntil = Now() + (seconds or 5)
+end
+
 -- Closing Blizzard's window closes the profession, so in CheapSkillUp mode it stays open
 -- but is made invisible (alpha 0) and tiny (so it can't catch clicks). Switching back restores it.
 function UI:ApplyBlizzardWindowMode()
@@ -3793,13 +3805,27 @@ function UI:ApplyBlizzardWindowMode()
 		blizzHooked = true
 		pf:HookScript("OnShow", function()
 			UI:ApplyBlizzardWindowMode()
-			if UseOwnWindow() and not (UI.frame and UI.frame:IsShown()) then
+			if UseOwnWindow() and not pf._csuQuiet and not (UI.frame and UI.frame:IsShown()) then
 				UI:Show(true)
 			end
 		end)
-		pf:HookScript("OnHide", function() UI:QueueRefresh() end)
+		pf:HookScript("OnHide", function()
+			-- opened quietly for a craft: back to normal size while it's closed
+			if pf._csuQuiet then
+				pf._csuQuiet = nil
+				if not UseOwnWindow() and pf._csuHidden then
+					pcall(pf.SetScale, pf, blizzScale or 1)
+					pcall(pf.SetAlpha, pf, 1)
+					pf._csuHidden = nil
+				end
+			end
+			UI:QueueRefresh()
+		end)
 	end
-	if UseOwnWindow() then
+	if IsQuiet() and not pf._csuQuiet then
+		pf._csuQuiet = true
+	end
+	if UseOwnWindow() or pf._csuQuiet then
 		local sc = pf:GetScale()
 		if sc and sc > 0.01 then blizzScale = sc end
 		pcall(pf.SetAlpha, pf, 0)
@@ -4396,13 +4422,14 @@ function UI:CreateQueueFrame()
 	clearBtn:SetPoint("BOTTOMRIGHT", -10, 10)
 	clearBtn:SetScript("OnClick", function() CSU.Queue:Clear() end)
 
-	local craftBtn = MakeFlatButton(q, 150, 24, "Craft next", "gold")
+	local craftBtn = MakeFlatButton(q, 150, 24, "Craft all", "gold")
 	craftBtn:SetPoint("RIGHT", clearBtn, "LEFT", -6, 0)
 	craftBtn:SetScript("OnClick", function() UI:CraftQueueNext() end)
 	craftBtn._onEnter = function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:AddLine("Craft next", 1, 0.82, 0)
-		GameTooltip:AddLine("Crafts the first thing in the queue, as many as the mats in your bags allow. Each finished craft counts the queue down.", 1, 1, 1, true)
+		GameTooltip:AddLine("Craft all", 1, 0.82, 0)
+		GameTooltip:AddLine("Crafts all of the first recipe in the queue that your bags have mats for. Each finished craft counts the queue down. With more recipes queued, click again for the next one.", 1, 1, 1, true)
+		GameTooltip:AddLine("The profession opens out of sight: no Blizzard window and no big addon window.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end
 	q.craftBtn = craftBtn
@@ -4533,12 +4560,19 @@ function UI:RenderQueue()
 	end
 	q.bankNote:SetText(note)
 	q.craftBtn:SetEnabledStyled(#list > 0, #list > 0 and "gold" or "default")
+	local nextN
+	for _, it in ipairs(list) do
+		local can = CSU.Queue:CanMakeFromBags(it)
+		if can > 0 then nextN = math.min(can, it.count) break end
+	end
+	q.craftBtn:SetLabel(nextN and string.format("Craft all (%d)", nextN) or "Craft all")
 end
 
 -- Crafts the first queued item, as many as the bags allow
 function UI:CraftQueueNext()
 	local Qd = CSU.Queue
 	local list = Qd:List()
+	self:BeginQuiet(5)
 	for _, it in ipairs(list) do
 		local can = Qd:CanMakeFromBags(it)
 		if can > 0 then
@@ -4809,6 +4843,7 @@ local function CompactRow(c, i)
 			CSU:ShowError(MissingText(e))
 			return
 		end
+		UI:BeginQuiet(5)
 		if CSU.Enchant and CSU.Enchant:SlotFor(e) then
 			CSU.Enchant:Cast(e, OpenRecipeInProfessionFrame)
 		else
@@ -5063,8 +5098,21 @@ function UI:Init()
 	CSU:RegisterEvent("AUCTION_HOUSE_SHOW", function() UI:QueueRefresh() end)
 	CSU:RegisterEvent("TRADE_SKILL_SHOW", function()
 		EnsureProfessionButton()
+		local pfs = _G.ProfessionsFrame
+		if pfs and pfs._csuQuiet and not IsQuiet() and not UI.UseOwnWindow() then
+			-- you opened a profession yourself while one was open out of sight: show it properly
+			local okI, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+			local id = okI and info and info.professionID
+			if C_TradeSkillUI.CloseTradeSkill then pcall(C_TradeSkillUI.CloseTradeSkill) end
+			if pfs:IsShown() and HideUIPanel then pcall(HideUIPanel, pfs) end
+			if id and C_Timer then
+				C_Timer.After(0.2, function() pcall(C_TradeSkillUI.OpenTradeSkill, id) end)
+			end
+			return
+		end
 		UI:ApplyBlizzardWindowMode()
-		if UI.UseOwnWindow() then
+		local pfq = _G.ProfessionsFrame
+		if UI.UseOwnWindow() and not (pfq and pfq._csuQuiet) and not IsQuiet() then
 			if not (UI.frame and UI.frame:IsShown()) then
 				UI:Show(true)
 			else
@@ -5076,7 +5124,8 @@ function UI:Init()
 	CSU:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED", function()
 		EnsureProfessionButton()
 		UI:ApplyBlizzardWindowMode()
-		if UI.UseOwnWindow() and IsBlizzardOpen() then
+		local pfq = _G.ProfessionsFrame
+		if UI.UseOwnWindow() and IsBlizzardOpen() and not (pfq and pfq._csuQuiet) and not IsQuiet() then
 			if not (UI.frame and UI.frame:IsShown()) then
 				UI:Show(true)
 			else
