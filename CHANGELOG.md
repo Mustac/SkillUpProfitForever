@@ -1,5 +1,16 @@
 # SkillUp & Profit Forever
 
+## 1.6.0
+
+- **Make your own mats**: when a recipe needs something you can make yourself (Bolt of Silk Cloth, cured hides, Bronze Tubes, bars from Mining), each such mat gets a **Buy / Make** switch. Make shows the raw mats under it with their own Buy buttons, the Buy button becomes **Make N**, and Craft makes them first. Until you choose, the cheaper way is used.
+- Making those mats counts toward your skill points in the cost per point.
+- **Enchanting**: an **Enchant** button puts the enchant on gear with no enchant (in your bags or worn), or on your own gear (asks for a second click). One click per skill-up.
+- **Craft Queue** puts the mats you make yourself in front of the recipe that needs them.
+- **Crafting bar**: recipe icon, crafts left and seconds. Drag it anywhere; on/off and size in Options (`/csu bar` to move it).
+- **Clear errors**: no materials, no anvil, no cooking fire and other crafting errors show in red above the crafting bar and on the window. Craft (0) tells you what's missing.
+- **What's new** window after an update (`/csu news`), and a notice when someone in your guild or group has a newer version.
+- **Graphite** theme (dark grey) is the new default. Mats bought on the AH show **In Mail** until you take them out.
+
 ## 1.5.0 (first public release)
 
 - Four modes: **Normal** (every recipe A to Z), **Cheapest** (cheapest mats per skill point), **Level + Earn** (skill up and sell what you make at the vendor or the AH, whichever pays more) and **Best Profit** (most gold per craft).

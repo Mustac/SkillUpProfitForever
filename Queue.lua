@@ -27,33 +27,94 @@ function Q:Count()
 	return n
 end
 
+-- How many of this item the queue will make, and how many the queue needs
+function Q:Produced(itemID)
+	local n = 0
+	for _, it in ipairs(self:List()) do
+		if it.outputItemID == itemID then n = n + (it.count or 0) * (it.outputQty or 1) end
+	end
+	return n
+end
+
+function Q:Needed(itemID)
+	local n = 0
+	for _, it in ipairs(self:List()) do
+		for _, r in ipairs(it.reagents or {}) do
+			if r.itemID == itemID then n = n + (r.qty or 1) * (it.count or 0) end
+		end
+	end
+	return n
+end
+
+local function FindIndex(list, recipeID)
+	for i, it in ipairs(list) do
+		if it.recipeID == recipeID then return i end
+	end
+end
+
 -- entry: a recipe from the calculator (has recipeID, name, reagents)
+-- Mats you make yourself (bolts, cured hides, bars...) are queued in front of it.
 function Q:Add(entry, count, prof)
 	if not (entry and entry.recipeID) then return false end
 	count = math.max(1, math.floor(tonumber(count) or 1))
 	local list = self:List()
-	for _, it in ipairs(list) do
-		if it.recipeID == entry.recipeID then
-			it.count = it.count + count
-			Fire()
-			return true
+
+	-- what you make yourself for it: how many more of those to make
+	local preps = {}
+	for _, r in ipairs(entry.reagents or {}) do
+		if r.how == "make" and r.maker and r.subs then
+			local need = (r.qty or 1) * count
+			local spare = CSU:GetOwnedCount(r.itemID) + self:Produced(r.itemID) - self:Needed(r.itemID)
+			local toMake = need - math.max(0, spare)
+			if toMake > 0 then
+				local rec = r.maker.rec
+				local outQ = (rec.outputQty and rec.outputQty > 0) and rec.outputQty or 1
+				local subR = {}
+				for _, sub in ipairs(r.subs) do
+					table.insert(subR, { itemID = sub.itemID, name = CSU:GetItemName(sub.itemID), qty = sub.qty,
+						vendor = CSU.Calc:IsVendorMat(sub.itemID) or nil })
+				end
+				table.insert(preps, {
+					recipeID = rec.id, name = rec.name, icon = rec.icon, outputItemID = rec.outputItemID,
+					outputQty = outQ, prof = r.maker.prof, count = math.ceil(toMake / outQ), reagents = subR, prep = true,
+				})
+			end
 		end
 	end
-	local reagents = {}
-	for _, r in ipairs(entry.reagents or {}) do
-		table.insert(reagents, { itemID = r.itemID, name = r.name, qty = r.qty, vendor = (r.source == "vendor") or nil })
+
+	local pos = FindIndex(list, entry.recipeID)
+	for _, p in ipairs(preps) do
+		local i = FindIndex(list, p.recipeID)
+		if i then
+			list[i].count = list[i].count + p.count
+		elseif pos then
+			table.insert(list, pos, p)
+			pos = pos + 1
+		else
+			table.insert(list, p)
+		end
 	end
-	table.insert(list, {
-		recipeID = entry.recipeID,
-		name = entry.name,
-		icon = entry.icon,
-		outputItemID = entry.outputItemID,
-		prof = prof,
-		count = count,
-		reagents = reagents,
-	})
+
+	if pos then
+		list[pos].count = list[pos].count + count
+	else
+		local reagents = {}
+		for _, r in ipairs(entry.reagents or {}) do
+			table.insert(reagents, { itemID = r.itemID, name = r.name, qty = r.qty, vendor = (r.source == "vendor") or nil })
+		end
+		table.insert(list, {
+			recipeID = entry.recipeID,
+			name = entry.name,
+			icon = entry.icon,
+			outputItemID = entry.outputItemID,
+			outputQty = entry.outputQty,
+			prof = prof,
+			count = count,
+			reagents = reagents,
+		})
+	end
 	Fire()
-	return true
+	return true, #preps
 end
 
 function Q:SetCount(i, n)
@@ -91,6 +152,7 @@ function Q:Materials()
 			m.need = m.need + (r.qty or 1) * (it.count or 1)
 		end
 	end
+	for _, m in ipairs(out) do m.produced = self:Produced(m.itemID) end
 	table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
 	return out
 end
@@ -251,7 +313,7 @@ function Q:PlanBankMoves()
 	local moves, summary = {}, {}
 	if not self.bankSlots then return moves, summary end
 	for _, m in ipairs(self:Materials()) do
-		local missing = m.need - CSU:GetBagCount(m.itemID) - CSU:GetIncoming(m.itemID)
+		local missing = m.need - CSU:GetBagCount(m.itemID) - CSU:GetIncoming(m.itemID) - (m.produced or 0)
 		local slots = self.bankSlots[m.itemID]
 		if missing > 0 and slots then
 			local inBank = 0

@@ -17,7 +17,8 @@ local SIDEBAR_ITEM_HEIGHT = 44
 
 local ROW_HEIGHT = 24
 local VISIBLE_ROWS = 40 -- rows made; how many show depends on the window height
-local MAX_BUY_ROWS = 5
+local MAX_BUY_ROWS = 10 -- mat rows on the card (mats + the raw mats of what you make yourself)
+local MIN_RESERVE_ROWS = 5
 local BUY_ROW_HEIGHT = 24
 local CALC_LINES = 4
 local CALC_LINE_H = 15
@@ -506,6 +507,52 @@ local function OpenRecipeInProfessionFrame(recipeID)
 	end
 end
 
+-- Can this be crafted right now? Checks tools / where you stand (anvil, forge, cooking fire,
+-- Blacksmith Hammer...) and the mats in your bags. Returns ok, message.
+function UI.CheckCraft(recipeID, count)
+	count = math.max(1, count or 1)
+	local T = C_TradeSkillUI
+	if not (T and recipeID) then return true end
+	if T.GetRecipeRequirements then
+		local ok, reqs = pcall(T.GetRecipeRequirements, recipeID)
+		if ok and type(reqs) == "table" then
+			local missing = {}
+			for _, r in ipairs(reqs) do
+				if r.met == false and r.name then table.insert(missing, r.name) end
+			end
+			if #missing > 0 then
+				return false, "Needs " .. table.concat(missing, ", ") .. ": stand next to it, or have it in your bags."
+			end
+		end
+	end
+	if T.GetRecipeSchematic then
+		local basic = Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic
+		local ok, sch = pcall(T.GetRecipeSchematic, recipeID, false)
+		if ok and type(sch) == "table" then
+			local miss = {}
+			for _, slot in ipairs(sch.reagentSlotSchematics or {}) do
+				if slot.required ~= false and (basic == nil or slot.reagentType == nil or slot.reagentType == basic) then
+					local have, firstID = 0, nil
+					for _, rg in ipairs(slot.reagents or {}) do
+						if rg.itemID then
+							firstID = firstID or rg.itemID
+							have = have + CSU:GetBagCount(rg.itemID)
+						end
+					end
+					local need = (slot.quantityRequired or 1) * count
+					if firstID and have < need then
+						table.insert(miss, string.format("%dx %s", need - have, CSU:GetItemName(firstID)))
+					end
+				end
+			end
+			if #miss > 0 then
+				return false, "Not enough materials in your bags: missing " .. table.concat(miss, ", ")
+			end
+		end
+	end
+	return true
+end
+
 local function CraftRecipeFromWindow(recipeID, count)
 	if not recipeID then return false end
 	count = math.max(1, math.floor(tonumber(count) or 1))
@@ -531,6 +578,15 @@ local function CraftRecipeFromWindow(recipeID, count)
 		return false
 	end
 
+	local can, why = UI.CheckCraft(recipeID, count)
+	if not can then
+		CSU:ShowError(why)
+		return false
+	end
+	if CSU.CastBar then
+		CSU.CastBar:Expect(count)
+		CSU.CastBar:WatchErrors(3)
+	end
 	if T.CraftRecipe then
 		local ok, err = pcall(T.CraftRecipe, recipeID, count)
 		if ok then
@@ -884,7 +940,42 @@ function UI:CreateMainFrame()
 		GameTooltip:Show()
 	end
 	op.bankBtn = bankBtn
-	op:SetHeight(-sy + 18 + 22 + 10 + 22 + 12)
+
+	local by = sy - 18 - 22 - 10 - 22 - 10
+	local cbOpt = MakeFlatButton(op, 230, 22, "Crafting bar: ON", "default")
+	cbOpt:SetPoint("TOPLEFT", 10, by)
+	cbOpt:SetScript("OnClick", function()
+		CSU.CastBar:SetEnabled(not CSU.CastBar:IsEnabled())
+		UI:UpdateOptions()
+	end)
+	cbOpt._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:AddLine("Crafting bar", 1, 0.82, 0)
+		GameTooltip:AddLine("A bar while you craft: the recipe icon, how many are left, and the seconds. Drag it anywhere. Errors (no materials, no anvil...) show above it.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end
+	op.cbOpt = cbOpt
+	local cbMinus = MakeFlatButton(op, 26, 22, "-", "default")
+	cbMinus:SetPoint("TOPLEFT", 10, by - 28)
+	cbMinus:SetScript("OnClick", function() CSU.CastBar:SetScale(CSU.CastBar:GetScale() - 0.1) UI:UpdateOptions() end)
+	local cbText = op:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	cbText:SetPoint("LEFT", cbMinus, "RIGHT", 4, 0)
+	cbText:SetWidth(70)
+	cbText:SetJustifyH("CENTER")
+	op.cbText = cbText
+	local cbPlus = MakeFlatButton(op, 26, 22, "+", "default")
+	cbPlus:SetPoint("LEFT", cbText, "RIGHT", 4, 0)
+	cbPlus:SetScript("OnClick", function() CSU.CastBar:SetScale(CSU.CastBar:GetScale() + 0.1) UI:UpdateOptions() end)
+	local cbMove = MakeFlatButton(op, 84, 22, "Move bar", "default")
+	cbMove:SetPoint("LEFT", cbPlus, "RIGHT", 10, 0)
+	cbMove:SetScript("OnClick", function() CSU.CastBar:Preview(20) end)
+	cbMove._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:AddLine("Move the crafting bar", 1, 0.82, 0)
+		GameTooltip:AddLine("Shows the bar for 20 seconds: drag it where you want it.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end
+	op:SetHeight(-by + 28 + 22 + 12)
 	f.optsPanel = op
 	optsBtn:SetScript("OnClick", function()
 		op:SetShown(not op:IsShown())
@@ -1279,8 +1370,12 @@ function UI:CreateMainFrame()
 		local e = card.itemHoverBtn.entry
 		if not e then return end
 		local n = math.max(1, UI.craftCount or 1)
-		CSU.Queue:Add(e, n, CSU.Calc.activeProfession)
-		CSU:Print("Queued %dx %s.", n, e.name or "?")
+		local _, preps = CSU.Queue:Add(e, n, CSU.Calc.activeProfession)
+		if preps and preps > 0 then
+			CSU:Print("Queued %dx %s, and the mats you make yourself for it go first.", n, e.name or "?")
+		else
+			CSU:Print("Queued %dx %s.", n, e.name or "?")
+		end
 		UI:ShowQueue()
 	end)
 	queueBtn._onEnter = function(self)
@@ -1412,12 +1507,38 @@ function UI:CreateMainFrame()
 	local craftBtn = MakeFlatButton(card, 84, 26, "Craft", "gold")
 	craftBtn:SetPoint("TOPRIGHT", -8, -31)
 	craftBtn:SetScript("OnClick", function(self)
+		if (self.craftQty or 0) <= 0 and not self.makeRecipeID then
+			CSU:ShowError(self.missingText or "Not enough materials in your bags.")
+			return
+		end
+		if self.enchantEntry then
+			CSU.Enchant:Cast(self.enchantEntry, OpenRecipeInProfessionFrame)
+			return
+		end
+		if self.makeRecipeID then
+			CraftRecipeFromWindow(self.makeRecipeID, self.makeQty or 1)
+			return
+		end
 		if self.recipeID and self.craftQty and self.craftQty > 0 then
 			CraftRecipeFromWindow(self.recipeID, self.craftQty)
 		end
 	end)
 	craftBtn._onEnter = function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		if self.enchantEntry then
+			local info = CSU.Enchant:SlotFor(self.enchantEntry)
+			GameTooltip:AddLine("Enchant: " .. (info and info.label or "?"), 1, 0.82, 0)
+			GameTooltip:AddLine("Puts this enchant on: " .. CSU.Enchant:Describe(info and CSU.Enchant:FindTarget(info)), 1, 1, 1, true)
+			GameTooltip:AddLine("Gear with no enchant is used first (bags or worn), then your own worn gear (asks for a second click). Click again for every skill-up.", 0.7, 0.7, 0.7, true)
+			GameTooltip:Show()
+			return
+		end
+		if self.makeRecipeID then
+			GameTooltip:AddLine("Make the mats first", 1, 0.82, 0)
+			GameTooltip:AddLine(string.format("Makes %dx %s from its own mats. Then Craft.", self.makeQty or 1, self.makeName or "?"), 1, 1, 1, true)
+			GameTooltip:Show()
+			return
+		end
 		GameTooltip:AddLine("Craft Directly", 1, 0.82, 0)
 		if self.craftQty and self.craftQty > 0 then
 			GameTooltip:AddLine(string.format("Crafts %dx using materials in your bags.", self.craftQty), 1, 1, 1, true)
@@ -1488,6 +1609,25 @@ function UI:CreateMainFrame()
 		end)
 		rRow.itemHover = rItemHover
 
+		-- Buy / Make toggle, only for mats one of your recipes makes (bolts, cured hides, bars...)
+		local modeBtn = MakeFlatButton(rRow, 44, 20, "Make", "default")
+		modeBtn:SetScript("OnClick", function(self)
+			if self.itemID then
+				CSU.Calc:SetMatChoice(self.itemID, self.how == "make" and "buy" or "make")
+			end
+		end)
+		modeBtn._onEnter = function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:AddLine(self.how == "make" and "You make this yourself" or "You buy this", 1, 0.82, 0)
+			local M = function(c) return c and CSU:FormatMoney(c) or "no price" end
+			GameTooltip:AddDoubleLine("Buy it:", M(self.buyUnit) .. " each", 1, 1, 1, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Make it" .. (self.makerProf and (" (" .. self.makerProf .. ")") or "") .. ":", M(self.makeUnit) .. " each", 1, 1, 1, 1, 1, 1)
+			GameTooltip:AddLine("Click to switch between buying it and making it from its own mats. Remembered for this mat.", 0.7, 0.7, 0.7, true)
+			GameTooltip:Show()
+		end
+		modeBtn:Hide()
+		rRow.modeBtn = modeBtn
+
 		local rCount = rRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		rCount:SetPoint("LEFT", 218, 0)
 		rCount:SetWidth(98)
@@ -1515,6 +1655,10 @@ function UI:CreateMainFrame()
 		local buyBtn = MakeFlatButton(rRow, 102, 20, "Buy", "buy")
 		buyBtn:SetPoint("RIGHT", searchBtn, "LEFT", -4, 0)
 		buyBtn:SetScript("OnClick", function(self)
+			if self.makeRecipeID then
+				if self.makeQty and self.makeQty > 0 then CraftRecipeFromWindow(self.makeRecipeID, self.makeQty) end
+				return
+			end
 			if self.itemID and self.qty and self.qty > 0 then
 				CSU.Buyer:ClickBuy(self.itemID, self.qty)
 				UI:Refresh()
@@ -1842,9 +1986,12 @@ local function LayoutBuyRow(r, narrow)
 	r.countFS:ClearAllPoints()
 	r.countFS:SetWidth(narrow and 40 or 98)
 	r.countFS:SetPoint("RIGHT", r.costFS, "LEFT", -4, 0)
+	r.modeBtn:ClearAllPoints()
+	r.modeBtn:SetWidth(narrow and 40 or 44)
+	r.modeBtn:SetPoint("RIGHT", r.countFS, "LEFT", -4, 0)
 	r.itemHover:ClearAllPoints()
 	r.itemHover:SetPoint("LEFT", 0, 0)
-	r.itemHover:SetPoint("RIGHT", r.countFS, "LEFT", -6, 0)
+	r.itemHover:SetPoint("RIGHT", r.modeBtn, "LEFT", -6, 0)
 	r.itemHover:SetHeight(BUY_ROW_HEIGHT)
 end
 
@@ -2045,6 +2192,38 @@ function UI:CycleLayout()
 	end
 end
 
+-- Red line at the top of the window for crafting errors (also shown above the crafting bar)
+function UI:ShowErrorBanner(msg)
+	local f = self.frame
+	if not (f and f:IsShown()) then return end
+	local b = f.errBanner
+	if type(b) ~= "table" then
+		b = MakeFrame("Frame", nil, f)
+		b:SetPoint("TOPLEFT", f.content, "TOPLEFT", 8, -4)
+		b:SetPoint("TOPRIGHT", f.content, "TOPRIGHT", -8, -4)
+		b:SetHeight(28)
+		b:SetFrameLevel((f:GetFrameLevel() or 1) + 70)
+		b:SetBackdrop(FLAT_BACKDROP)
+		b:SetBackdropColor(0.30, 0.05, 0.05, 0.95)
+		b:SetBackdropBorderColor(1, 0.35, 0.30, 1)
+		b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		b.text:SetPoint("LEFT", 10, 0)
+		b.text:SetPoint("RIGHT", -10, 0)
+		b.text:SetJustifyH("LEFT")
+		b.text:SetTextColor(1, 0.85, 0.80)
+		if b.text.SetWordWrap then b.text:SetWordWrap(false) end
+		b:EnableMouse(true)
+		b:SetScript("OnMouseDown", function(self) self:Hide() end)
+		f.errBanner = b
+	end
+	b.text:SetText(msg)
+	b:Show()
+	b.until_ = GetTime() + 6
+	C_Timer.After(6.1, function()
+		if b.until_ and GetTime() >= b.until_ then b:Hide() end
+	end)
+end
+
 function UI:GetScale()
 	local s = tonumber(CSU.settings and CSU.settings.scale) or 1
 	return math.max(MIN_SCALE, math.min(MAX_SCALE, s))
@@ -2083,6 +2262,12 @@ function UI:UpdateOptions()
 	local inc = CSU.settings.includeBank
 	op.bankBtn:SetLabel(inc and CSU:Color(CSU.COLORS.good, "Count bank items: ON") or "Count bank items: OFF")
 	op.bankBtn:SetStyle(inc and "buy" or "default")
+	if CSU.CastBar then
+		local on = CSU.CastBar:IsEnabled()
+		op.cbOpt:SetLabel(on and CSU:Color(CSU.COLORS.good, "Crafting bar: ON") or "Crafting bar: OFF")
+		op.cbOpt:SetStyle(on and "buy" or "default")
+		op.cbText:SetText(string.format("Bar %d%%", math.floor(CSU.CastBar:GetScale() * 100 + 0.5)))
+	end
 end
 
 function UI:ApplyTheme()
@@ -2736,6 +2921,25 @@ function UI:RenderRows()
 	end
 end
 
+-- The card's mat rows: each mat, and under a mat you make yourself, the mats it is made from
+function UI.BuildMatLines(entry, crafts)
+	crafts = crafts or 1
+	local lines = {}
+	for _, r in ipairs(entry and entry.reagents or {}) do
+		local req = r.qty * crafts
+		local ln = { kind = "mat", r = r, itemID = r.itemID, req = req }
+		table.insert(lines, ln)
+		if r.how == "make" and r.subs then
+			local toMake = math.max(0, req - CSU:GetOwnedCount(r.itemID))
+			local makerCrafts = math.ceil(toMake / (r.makeOutQty or 1))
+			for _, sub in ipairs(r.subs) do
+				table.insert(lines, { kind = "sub", itemID = sub.itemID, req = sub.qty * makerCrafts, parent = r })
+			end
+		end
+	end
+	return lines
+end
+
 function UI:RenderBuyCard(entry, isCheapest, prof)
 	local card = self.frame.bestCard
 	local crafts = math.max(1, self.craftCount or 1)
@@ -2780,7 +2984,7 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	box:ClearAllPoints()
 	local stackH = 3 * CALC_H + 12
 	if layout == "classic" then
-		local matsBottom = 70 + (MAX_BUY_ROWS * (BUY_ROW_HEIGHT + 2))
+		local matsBottom = 70 + ((self.rowReserve or MIN_RESERVE_ROWS) * (BUY_ROW_HEIGHT + 2))
 		card:SetHeight(matsBottom + 8 + CALC_H + 8)
 		box:SetPoint("TOPLEFT", 8, -(matsBottom + 8))
 		box:SetPoint("TOPRIGHT", -8, -(matsBottom + 8))
@@ -2848,6 +3052,9 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	if entry.numSkillUps > 1 then
 		tag = tag .. CSU:Color(CSU.COLORS.good, string.format("  +%d pts", entry.numSkillUps))
 	end
+	if entry.subPoints and entry.subPoints >= 0.05 then
+		tag = tag .. CSU:Color(CSU.COLORS.good, string.format("  +%.1f pts from mats you make", entry.subPoints))
+	end
 	if entry.bagCrafts then
 		tag = tag .. CSU:Color(CSU.COLORS.good, string.format("  can make %d from bags", entry.bagCrafts))
 	end
@@ -2863,15 +3070,34 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	local craftableNow = math.huge
 	local nextItemID, nextNeed
 
+	local lines = UI.BuildMatLines(entry, crafts)
+	-- rows that fit on the card (side layouts have a fixed card)
+	local maxRows = MAX_BUY_ROWS
+	local lay = UI.GetLayout()
+	if lay ~= "classic" and lay ~= "C" then
+		local h = tonumber(card:GetHeight()) or 0
+		if h > 0 then
+			maxRows = math.max(1, math.min(MAX_BUY_ROWS, math.floor((h - NARROW_MATS_TOP - (3 * CALC_H + 12) - 16) / (BUY_ROW_HEIGHT + 2))))
+		end
+	end
+	local makeFirst -- a mat you make yourself that is missing in your bags: Craft makes it first
+	local missingParts = {} -- what's missing in the bags for one craft (Craft (0) says it)
+
 	for i = 1, MAX_BUY_ROWS do
 		local rRow = self.buyRows[i]
-		local r = entry.reagents and entry.reagents[i]
-		if r then
-			local reqTotal = r.qty * crafts
-			local inBags = CSU:GetBagCount(r.itemID)
-			local coming = CSU:GetIncoming(r.itemID) -- bought on the AH, waiting in the mailbox
-			local fromBank = CSU.GetBankIncluded and CSU:GetBankIncluded(r.itemID) or 0 -- Count bank: ON
+		local ln = (i <= maxRows) and lines[i] or nil
+		if ln then
+			local itemID = ln.itemID
+			local isSub = ln.kind == "sub"
+			local r = ln.r
+			local reqTotal = ln.req
+			local inBags = CSU:GetBagCount(itemID)
+			local coming = CSU:GetIncoming(itemID) -- bought on the AH, waiting in the mailbox
+			local fromBank = CSU.GetBankIncluded and CSU:GetBankIncluded(itemID) or 0 -- Count bank: ON
 			local have = inBags + coming + fromBank
+			local unit
+			if isSub then unit = CSU.Calc:MatCost(itemID) else unit = r.unitPrice end
+			local making = (not isSub) and r.how == "make" and r.subs
 			-- what the mats taken from your bags would sell for on the AH (vendor if no AH price)
 			local fromBags = math.min(have, reqTotal)
 			-- which part comes from where: bags first, then mailbox, then bank
@@ -2881,33 +3107,58 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 			unitsMail = unitsMail + m
 			unitsBank = unitsBank + math.max(0, fromBags - b - m)
 			if fromBags > 0 then
-				local _, _, ahNet, vend = CSU.Prices:GetSellValue(r.itemID)
+				local _, _, ahNet, vend = CSU.Prices:GetSellValue(itemID)
 				bagUnits = bagUnits + fromBags
 				bagValue = bagValue + fromBags * (ahNet or vend or 0)
-				if unitOf(r) then bagCost = bagCost + fromBags * unitOf(r) end
+				if unit then bagCost = bagCost + fromBags * unit end
 			end
 			local need = math.max(0, reqTotal - have)
-			local unit = r.unitPrice
-			local canMake = math.floor(inBags / math.max(1, r.qty)) -- you can only craft with what's in your bags
-			if canMake < craftableNow then craftableNow = canMake end
+			if not isSub then
+				local canMake = math.floor(inBags / math.max(1, r.qty)) -- you can only craft with what's in your bags
+				if canMake < craftableNow then craftableNow = canMake end
+				if inBags < r.qty then
+					local where = ""
+					if coming > 0 then where = " (in your mailbox)" elseif fromBank > 0 then where = " (in your bank)" end
+					table.insert(missingParts, string.format("%dx %s%s", r.qty - inBags, r.name or "?", where))
+				end
+			end
 
 			if unit then
-				batchTotal = batchTotal + (unit * reqTotal)
-				batchBuy = batchBuy + (unit * need)
-			else
+				if not isSub then batchTotal = batchTotal + (unit * reqTotal) end
+				-- what you still pay: bought mats, and the raw mats of what you make (not the made mat itself)
+				if not making then batchBuy = batchBuy + (unit * need) end
+			elseif not isSub then
 				batchComplete = false
 			end
 
-			local _, _, _, itemIcon = CSU:GetItemInfoSafe(r.itemID)
+			local _, _, _, itemIcon = CSU:GetItemInfoSafe(itemID)
 			rRow.icon:SetTexture(itemIcon or 134400)
-			rRow.itemHover.itemID = r.itemID
+			rRow.icon:ClearAllPoints()
+			rRow.icon:SetPoint("LEFT", isSub and 16 or 0, 0)
+			rRow.itemHover.itemID = itemID
 
-			local srcTag = CSU.Calc:IsVendorMat(r.itemID) and CSU:Color(CSU.COLORS.vendor, "  Vendor") or ""
-			rRow.nameFS:SetText(r.name .. srcTag)
+			local name
+			if isSub then name = CSU:Color(CSU.COLORS.muted, "for it: ") .. CSU:GetItemName(itemID) else name = r.name end
+			local srcTag = CSU.Calc:IsVendorMat(itemID) and CSU:Color(CSU.COLORS.vendor, "  Vendor") or ""
+			rRow.nameFS:SetText(name .. srcTag)
+
+			-- Buy / Make toggle
+			local mb = rRow.modeBtn
+			if not isSub and r.makeable then
+				mb.itemID, mb.how = itemID, r.how
+				mb.buyUnit, mb.makeUnit = r.buyUnit, r.makeUnit
+				mb.makerProf = r.maker and r.maker.prof
+				mb:SetLabel(r.how == "make" and "Make" or "Buy")
+				mb:SetStyle(r.how == "make" and "gold" or "default")
+				mb:Show()
+			else
+				mb:Hide()
+			end
+
 			if UI.narrowCard then
 				rRow.countFS:SetText(string.format("%d/%d", have, reqTotal))
 			else
-				rRow.countFS:SetText(string.format("%d/%d (buy %d)", have, reqTotal, need))
+				rRow.countFS:SetText(string.format("%d/%d (%s %d)", have, reqTotal, making and "make" or "buy", need))
 			end
 			if unit then
 				rRow.costFS:SetText(need > 0 and CSU:FormatMoney(unit * need) or CSU:Color(CSU.COLORS.good, "0c"))
@@ -2915,27 +3166,55 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 				rRow.costFS:SetText(CSU:Color(CSU.COLORS.bad, "No price"))
 			end
 
-			rRow.searchBtn.itemID = r.itemID
-			ConfigureBuyButton(rRow.buyBtn, r.itemID, need, r.source, reqTotal)
-			if need > 0 and CSU.Prices.ahOpen and not CSU.Buyer:CanBuyFromMerchant(r.itemID) then
-				local st, exact, got = CSU.Buyer:GetState(r.itemID, need)
-				if (st == "buy" or st == "confirm") and exact then
-					-- real price of the first `need` on the AH right now
-					local txt = CSU:FormatMoney(exact)
-					if got and got < need then txt = txt .. CSU:Color(CSU.COLORS.warn, " (" .. got .. ")") end
-					rRow.costFS:SetText(txt)
-				elseif st == "none" then
-					rRow.costFS:SetText(CSU:Color(CSU.COLORS.bad, "none on AH"))
-				elseif unit then
-					rRow.costFS:SetText(CSU:Color(CSU.COLORS.muted, "~") .. CSU:FormatMoney(unit * need))
+			rRow.searchBtn.itemID = itemID
+			local bb = rRow.buyBtn
+			bb.makeRecipeID, bb.makeQty = nil, nil
+			if making then
+				-- the Buy button becomes Make: makes the missing ones from their mats in your bags
+				local fromRaw = math.huge
+				for _, sub in ipairs(r.subs) do
+					fromRaw = math.min(fromRaw, math.floor(CSU:GetBagCount(sub.itemID) / math.max(1, sub.qty)))
 				end
-			end
-
-			if not nextItemID and need > 0 then
-				if CSU.Buyer:CanBuyFromMerchant(r.itemID) or r.source ~= "vendor" or CSU.Prices.ahOpen then
-					nextItemID, nextNeed = r.itemID, need
+				if fromRaw == math.huge then fromRaw = 0 end
+				local outQ = r.makeOutQty or 1
+				local wantCrafts = math.ceil(need / outQ)
+				bb.itemID, bb.qty = itemID, 0
+				if need <= 0 then
+					ConfigureBuyButton(bb, itemID, 0, nil, reqTotal)
 				else
-					vendorNeeded = (vendorNeeded or 0) + 1
+					bb.makeRecipeID = r.maker.rec.id
+					bb.makeQty = math.min(wantCrafts, fromRaw)
+					bb:SetLabel("Make " .. need)
+					bb:SetEnabledStyled(fromRaw > 0, fromRaw > 0 and "gold" or "default")
+				end
+				-- missing in bags for this craft: Craft makes them first
+				local shortInBags = reqTotal - inBags
+				if not makeFirst and shortInBags > 0 and fromRaw > 0 then
+					makeFirst = { recipeID = r.maker.rec.id, qty = math.min(math.ceil(shortInBags / outQ), fromRaw), name = r.name }
+				end
+			else
+				ConfigureBuyButton(bb, itemID, need, (not isSub) and r.source or nil, reqTotal)
+				if need > 0 and CSU.Prices.ahOpen and not CSU.Buyer:CanBuyFromMerchant(itemID) then
+					local st, exact, got = CSU.Buyer:GetState(itemID, need)
+					if (st == "buy" or st == "confirm") and exact then
+						-- real price of the first `need` on the AH right now
+						local txt = CSU:FormatMoney(exact)
+						if got and got < need then txt = txt .. CSU:Color(CSU.COLORS.warn, " (" .. got .. ")") end
+						rRow.costFS:SetText(txt)
+					elseif st == "none" then
+						rRow.costFS:SetText(CSU:Color(CSU.COLORS.bad, "none on AH"))
+					elseif unit then
+						rRow.costFS:SetText(CSU:Color(CSU.COLORS.muted, "~") .. CSU:FormatMoney(unit * need))
+					end
+				end
+				if not nextItemID and need > 0 then
+					local src
+					if isSub then src = select(2, CSU.Prices:GetUnitCost(itemID)) else src = r.source end
+					if CSU.Buyer:CanBuyFromMerchant(itemID) or src ~= "vendor" or CSU.Prices.ahOpen then
+						nextItemID, nextNeed = itemID, need
+					else
+						vendorNeeded = (vendorNeeded or 0) + 1
+					end
 				end
 			end
 
@@ -2945,17 +3224,30 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 		end
 	end
 
-	-- Update Craft button (craft up to min(crafts, craftableNow) directly from CheapSkillUp!)
+	-- Craft button: enchants go on an item; mats you make come first; else craft
 	if craftableNow == math.huge then craftableNow = 0 end
 	local toCraft = math.min(crafts, craftableNow)
-	card.craftBtn.recipeID = entry.recipeID
-	card.craftBtn.craftQty = toCraft
-	if toCraft > 0 then
-		card.craftBtn:SetLabel("Craft x" .. toCraft)
-		card.craftBtn:SetEnabledStyled(true, "gold")
+	local cb = card.craftBtn
+	cb.recipeID = entry.recipeID
+	cb.craftQty = toCraft
+	cb.makeRecipeID, cb.makeQty, cb.makeName, cb.enchantEntry = nil, nil, nil, nil
+	cb.missingText = #missingParts > 0 and ("Not enough materials in your bags: missing " .. table.concat(missingParts, ", ")) or nil
+	local enchantInfo = CSU.Enchant and CSU.Enchant:SlotFor(entry)
+	if enchantInfo then
+		cb.enchantEntry = entry
+		cb.craftQty = craftableNow
+		cb:SetLabel(craftableNow > 0 and ("Enchant (" .. craftableNow .. ")") or "Enchant (0)")
+		cb:SetEnabledStyled(true, craftableNow > 0 and "gold" or "default")
+	elseif toCraft < crafts and makeFirst then
+		cb.makeRecipeID, cb.makeQty, cb.makeName = makeFirst.recipeID, makeFirst.qty, makeFirst.name
+		cb:SetLabel("Make x" .. makeFirst.qty)
+		cb:SetEnabledStyled(true, "gold")
+	elseif toCraft > 0 then
+		cb:SetLabel("Craft x" .. toCraft)
+		cb:SetEnabledStyled(true, "gold")
 	else
-		card.craftBtn:SetLabel("Craft (0)")
-		card.craftBtn:SetEnabledStyled(false, "default")
+		cb:SetLabel("Craft (0)")
+		cb:SetEnabledStyled(true, "default") -- still clickable: says what's missing
 	end
 
 	-- Clear numbers for this many crafts
@@ -3369,6 +3661,16 @@ function UI:Refresh()
 	if f.bestCard.tabBags then
 		f.bestCard.tabBags:SetLabel(string.format("Bags (%d)", #(bagItems or {})))
 	end
+
+	local reserve = MIN_RESERVE_ROWS
+	for _, e in ipairs(list) do
+		local n = #(e.reagents or {})
+		for _, r in ipairs(e.reagents or {}) do
+			if r.how == "make" and r.subs then n = n + #r.subs end
+		end
+		if n > reserve then reserve = n end
+	end
+	self.rowReserve = math.min(MAX_BUY_ROWS, reserve)
 
 	local selected = FindSelectedEntry(list)
 	local isCheapest = (selected ~= nil and list[1] ~= nil and selected.recipeID == list[1].recipeID)
@@ -4101,8 +4403,9 @@ function UI:RenderQueue()
 		m.bags = CSU:GetBagCount(m.itemID)
 		m.bank = CSU:GetBankCount(m.itemID)
 		m.mail = CSU:GetIncoming(m.itemID)
-		m.buy = math.max(0, m.need - m.bags - m.mail - (incBank and m.bank or 0))
-		local missing = m.need - m.bags - m.mail
+		m.made = m.produced or 0 -- made by something earlier in the queue (bolts...)
+		m.buy = math.max(0, m.need - m.bags - m.mail - (incBank and m.bank or 0) - m.made)
+		local missing = m.need - m.bags - m.mail - m.made
 		if missing > 0 and m.bank > 0 then bankTakeable = bankTakeable + math.min(missing, m.bank) end
 		if m.buy > 0 then
 			local unit = CSU.Prices:GetUnitCost(m.itemID)
@@ -4116,7 +4419,8 @@ function UI:RenderQueue()
 			local _, _, _, ic = CSU:GetItemInfoSafe(m.itemID)
 			r.icon:SetTexture(ic or 134400)
 			r.hover.itemID = m.itemID
-			r.nameFS:SetText((m.name or "?") .. (m.vendor and CSU:Color(CSU.COLORS.vendor, "  Vendor") or ""))
+			r.nameFS:SetText((m.name or "?") .. (m.vendor and CSU:Color(CSU.COLORS.vendor, "  Vendor") or "")
+				.. (m.made > 0 and CSU:Color(CSU.COLORS.muted, string.format("  (queue makes %d)", m.made)) or ""))
 			r.cols.need:SetText(tostring(m.need))
 			r.cols.bags:SetText(m.bags > 0 and tostring(m.bags) or CSU:Color(muted, "0"))
 			local bankTxt = tostring(m.bank)
@@ -4126,6 +4430,9 @@ function UI:RenderQueue()
 			r.cols.mail:SetText(m.mail > 0 and tostring(m.mail) or CSU:Color(muted, "0"))
 			r.cols.buy:SetText(m.buy > 0 and CSU:Color(CSU.COLORS.warn, tostring(m.buy)) or CSU:Color(CSU.COLORS.good, "0"))
 			ConfigureBuyButton(r.buyBtn, m.itemID, m.buy, nil, m.need)
+			if m.buy <= 0 and m.made > 0 and m.need > m.bags + m.mail + (incBank and m.bank or 0) then
+				r.buyBtn:SetLabel(CSU:Color(CSU.COLORS.vendor, "Made in queue"))
+			end
 			r:Show()
 		else
 			r:Hide()
@@ -4174,6 +4481,10 @@ function UI:CraftQueueNext()
 		local can = Qd:CanMakeFromBags(it)
 		if can > 0 then
 			local n = math.min(can, it.count)
+			if CSU.Enchant and CSU.Enchant:SlotFor(it) then
+				CSU.Enchant:Cast(it, OpenRecipeInProfessionFrame)
+				return
+			end
 			if CraftRecipeFromWindow(it.recipeID, n) then
 				CSU:Print("Crafting %dx %s.", n, it.name or "?")
 			end
@@ -4187,6 +4498,7 @@ end
 
 function UI:Init()
 	CSU:On("PROFESSION_UPDATED", function() UI:QueueRefresh() end)
+	CSU:On("MAT_CHOICE_CHANGED", function() UI:QueueRefresh() UI:RenderQueue() end)
 	CSU:On("PRICES_UPDATED", function() UI:QueueRefresh() end)
 	CSU:On("FILTER_CHANGED", function() UI:QueueRefresh() end)
 	CSU:On("BAGS_UPDATED", function() UI:QueueRefresh() end)

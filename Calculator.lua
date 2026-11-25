@@ -205,6 +205,7 @@ function Calc:ScanOpenProfession()
 	}
 
 	self.activeProfession = meta.name
+	self:InvalidateMakers()
 	CSU:Fire("PROFESSION_UPDATED", meta.name)
 	return true
 end
@@ -598,11 +599,96 @@ local function IsDifficultySelected(diffKey)
 	return false
 end
 
+---------------------------------------------------------------------------
+-- Makeable mats: a mat one of your own recipes makes (Bolt of Silk Cloth from Silk Cloth,
+-- Cured Medium Hide, Bronze Tube, smelted bars from Mining...). You choose Buy or Make per mat;
+-- until you choose, the cheaper way is used.
+---------------------------------------------------------------------------
+local MAKE_DEPTH = 3
+-- skill points a craft of this colour gives, roughly (for bolts etc. made on the way)
+local DIFF_POINTS = { optimal = 1, medium = 1, easy = 0.25, trivial = 0 }
+Calc.DIFF_POINTS = DIFF_POINTS
+
+local makersCache
+function Calc:InvalidateMakers() makersCache = nil end
+
+-- itemID -> { rec = recipe that makes it, prof = profession name }, from every profession you've opened
+function Calc:GetMakers()
+	if makersCache then return makersCache end
+	local m = {}
+	local charDB = CSU:GetCharDB()
+	for pname, data in pairs(charDB.professions or {}) do
+		if type(data) == "table" and type(data.recipes) == "table" then
+			for _, rec in pairs(data.recipes) do
+				if rec.outputItemID and rec.slots and #rec.slots > 0 then
+					local cur = m[rec.outputItemID]
+					-- several recipes make the same thing: keep the one needing the fewest mat kinds
+					if not cur or #rec.slots < #cur.rec.slots then
+						m[rec.outputItemID] = { rec = rec, prof = pname }
+					end
+				end
+			end
+		end
+	end
+	makersCache = m
+	return m
+end
+
+function Calc:GetMatChoice(itemID)
+	local c = CSU.settings and CSU.settings.matChoice
+	return c and c[itemID]
+end
+
+function Calc:SetMatChoice(itemID, choice)
+	CSU.settings.matChoice = CSU.settings.matChoice or {}
+	CSU.settings.matChoice[itemID] = choice
+	CSU:Fire("MAT_CHOICE_CHANGED", itemID)
+end
+
+-- Cost of one of this mat the way you get it (buy or make). Returns unit, how, info
+-- info = { buy, make, source, listed, maker, subs = { {itemID, qty} }, outQty }
+function Calc:MatCost(itemID, depth, visiting)
+	depth = depth or 0
+	local buy, source, listed = CSU.Prices:GetUnitCost(itemID)
+	local maker = (depth < MAKE_DEPTH) and self:GetMakers()[itemID] or nil
+	local make, subs, outQty
+	if maker and not (visiting and visiting[itemID]) then
+		visiting = visiting or {}
+		visiting[itemID] = true
+		local rec = maker.rec
+		outQty = (rec.outputQty and rec.outputQty > 0) and rec.outputQty or 1
+		local total, ok = 0, true
+		subs = {}
+		for _, slot in ipairs(rec.slots) do
+			local bestID, bestU
+			for _, sid in ipairs(slot.items) do
+				local u = self:MatCost(sid, depth + 1, visiting)
+				if u and (not bestU or u < bestU) then bestID, bestU = sid, u end
+			end
+			bestID = bestID or slot.items[1]
+			table.insert(subs, { itemID = bestID, qty = slot.qty or 1 })
+			if bestU then total = total + bestU * (slot.qty or 1) else ok = false end
+		end
+		visiting[itemID] = nil
+		if ok then make = total / outQty end
+	end
+	local how = "buy"
+	if subs then
+		local choice = self:GetMatChoice(itemID)
+		if choice == "make" then how = "make"
+		elseif choice == "buy" then how = "buy"
+		elseif make and (not buy or make < buy) then how = "make" end
+	end
+	local unit = (how == "make") and make or buy
+	return unit, how, { buy = buy, make = make, source = source, listed = listed, maker = subs and maker or nil, subs = subs, outQty = outQty }
+end
+
 function Calc:EvaluateRecipe(rec, currentSkill)
 	local totalCost = 0
 	local buyCost = 0
 	local missingPrices = 0
 	local reagents = {}
+	local subPoints = 0
 
 	local bagMode = self:IsBagMode()
 	local bags = bagMode and self:GetBagCounts() or nil
@@ -613,17 +699,22 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 	for _, slot in ipairs(rec.slots or {}) do
 		local qty = slot.qty or 1
 		local bestItemID = slot.items[1]
-		local bestUnit, bestSource, bestListed
+		local bestUnit, bestSource, bestListed, bestHow, bestInfo
 
-		-- If a slot accepts multiple alternative reagents, pick the cheapest priced one
+		-- If a slot accepts multiple alternative reagents, pick the cheapest one (bought or made)
 		for _, itemID in ipairs(slot.items) do
-			local unit, source, listed = CSU.Prices:GetUnitCost(itemID)
+			local unit, how, info = self:MatCost(itemID)
 			if unit and (not bestUnit or unit < bestUnit) then
 				bestItemID = itemID
 				bestUnit = unit
-				bestSource = source
-				bestListed = listed
+				bestSource = (how == "make") and "make" or info.source
+				bestListed = info.listed
+				bestHow, bestInfo = how, info
 			end
+		end
+		if not bestInfo then
+			local _, how, info = self:MatCost(bestItemID)
+			bestHow, bestInfo = how, info
 		end
 
 		if bagMode then
@@ -638,6 +729,7 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 			if pick then
 				bestItemID = pick
 				bestUnit, bestSource, bestListed = CSU.Prices:GetUnitCost(pick)
+				bestHow, bestInfo = "buy", { buy = bestUnit }
 				-- Vendor mats (thread, salt...) don't limit the count when vendor mats are allowed: buy more
 				if not (allowVendor and self:IsVendorMat(pick)) then
 					bagCrafts = math.min(bagCrafts, math.floor(pickHave / qty))
@@ -652,6 +744,7 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 				if vend then
 					bestItemID = vend
 					bestUnit, bestSource, bestListed = CSU.Prices:GetUnitCost(vend)
+					bestHow, bestInfo = "buy", { buy = bestUnit }
 				else
 					bagBlocked = true
 				end
@@ -682,10 +775,24 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 			buyTotal = buyTotal,
 			source = bestSource,
 			listedQty = bestListed,
+			-- makeable mats
+			how = bestHow,
+			makeable = (bestInfo and bestInfo.maker) and true or nil,
+			buyUnit = bestInfo and bestInfo.buy,
+			makeUnit = bestInfo and bestInfo.make,
+			maker = bestInfo and bestInfo.maker,
+			subs = bestInfo and bestInfo.subs,
+			makeOutQty = bestInfo and bestInfo.outQty,
 		})
+		-- making it in the same profession gives skill points too
+		if bestHow == "make" and bestInfo and bestInfo.maker and bestInfo.maker.prof == self.evalProf then
+			local pts = DIFF_POINTS[bestInfo.maker.rec.difficulty] or 0
+			subPoints = subPoints + pts * qty / (bestInfo.outQty or 1)
+		end
 	end
 
 	local skillUps = (rec.numSkillUps and rec.numSkillUps > 0) and rec.numSkillUps or 1
+	local points = skillUps + subPoints -- + points from making its mats (bolts...) yourself
 	local complete = (missingPrices == 0)
 
 	-- What the crafted item sells back for (best of vendor / AH after the 5% cut)
@@ -720,8 +827,9 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 		missingPrices = missingPrices,
 		totalCost = complete and totalCost or nil,
 		buyCost = complete and buyCost or nil,
-		costPerSkillUp = complete and (totalCost / skillUps) or nil,
-		buyCostPerSkillUp = complete and (buyCost / skillUps) or nil,
+		costPerSkillUp = complete and (totalCost / points) or nil,
+		buyCostPerSkillUp = complete and (buyCost / points) or nil,
+		subPoints = subPoints > 0 and subPoints or nil,
 		partialCost = totalCost,
 		reagents = reagents,
 		craftsToYellow = craftsToYellow,
@@ -738,7 +846,7 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 		profit = profit,
 		costBasis = complete and costBasis or nil,
 		netCost = complete and (costBasis - sellTotal) or nil,
-		netCostPerSkillUp = complete and ((costBasis - sellTotal) / skillUps) or nil,
+		netCostPerSkillUp = complete and ((costBasis - sellTotal) / points) or nil,
 		bagCrafts = bagMode and (bagCrafts == math.huge and 0 or bagCrafts) or nil,
 		bagOK = bagMode and (not bagBlocked) and bagCrafts ~= math.huge and bagCrafts >= 1 or nil,
 	}
@@ -773,6 +881,7 @@ function Calc:GetRankedRecipes(profName)
 
 	local mode = self:GetMode()
 	local list = {}
+	self.evalProf = saved.name
 	for _, rec in pairs(prof.recipes or {}) do
 		local include
 		if mode == "profit" or mode == "normal" then

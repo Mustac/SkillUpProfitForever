@@ -6,7 +6,7 @@ _G.CheapSkillUp = CSU
 
 CSU.name = ADDON_NAME
 CSU.CALLER_ID = ADDON_NAME
-CSU.version = "1.5.0"
+CSU.version = "1.6.0"
 
 CSU.DEFAULTS = {
 	showOptimal = true,          -- Red/Orange (guaranteed skill-up)
@@ -30,6 +30,8 @@ CSU.DEFAULTS = {
 	layout = "classic",          -- classic | A | B | C | D (Options > Layout)
 	scale = 1,                   -- size of the whole addon (0.6 - 1.5)
 	queueShown = nil,            -- queue window open (back after login/reload); false = you closed it
+	castBar = true,              -- crafting bar (icon, crafts left, seconds); drag to move
+	castBarScale = 1,            -- size of the crafting bar
 	includeBank = false,         -- count bank items as yours (Craft Queue / Options)
 	ahHours = 8,                 -- auction length used for the AH deposit: 2, 8 or 24 hours
 	arrow = true,                -- show our own arrow to the pinned trainer / next route stop
@@ -406,6 +408,10 @@ SlashCmdList["CHEAPSKILLUP"] = function(msg)
 			end
 			CSU:Print("Scale: %d%% (60 to 150). Example: /csu scale 90", math.floor(CSU.UI:GetScale() * 100 + 0.5))
 		end
+	elseif cmd == "news" then
+		if CSU.Notify then CSU.Notify:ShowWhatsNew(true) end
+	elseif cmd == "bar" then
+		if CSU.CastBar then CSU.CastBar:Preview(20) CSU:Print("Drag the crafting bar where you want it (shown for 20 seconds).") end
 	elseif cmd == "queue" then
 		if CSU.UI and CSU.UI.ToggleQueue then CSU.UI:ToggleQueue() end
 	elseif cmd == "bank" then
@@ -425,12 +431,13 @@ SlashCmdList["CHEAPSKILLUP"] = function(msg)
 		if CSU.Arrow then CSU.Arrow:Toggle() end
 	elseif cmd == "reset" then
 		if CSU.Arrow then CSU.Arrow:ResetPosition() end
+		if CSU.CastBar then CSU.CastBar:ResetPosition() end
 		CSU.settings.launcherPoint = nil
 		CSU.settings.windowPoint = nil
 		CSU.settings.routeBoxPoint = nil
 		if CSU.UI and CSU.UI.ResetPositions then CSU.UI:ResetPositions() end
 		if CSU.UI and CSU.UI.RenderRouteBox then CSU.UI:RenderRouteBox() end
-		CSU:Print("Reset icon, window and arrow positions.")
+		CSU:Print("Reset icon, window, arrow and crafting bar positions.")
 	elseif cmd == "help" then
 		CSU:Print("Commands:")
 		CSU:Print("  /csu          - Open / toggle the SkillUp & Profit window")
@@ -447,10 +454,12 @@ SlashCmdList["CHEAPSKILLUP"] = function(msg)
 		CSU:Print("  /csu ah 2|8|24 - Auction length for the AH deposit in profit (now %dh)", CSU.Prices:GetAHHours())
 		CSU:Print("  /csu layout [classic|a|b|c|d] - Window layout (also in Options)")
 		CSU:Print("  /csu scale 90  - Size of the whole addon in % (also in Options)")
+		CSU:Print("  /csu news     - What's new in this version")
+		CSU:Print("  /csu bar      - Show the crafting bar so you can move it")
 		CSU:Print("  /csu queue    - Open the craft queue")
 		CSU:Print("  /csu bank     - Count bank items as yours: on / off")
 		CSU:Print("  /csu arrow    - Show / hide the arrow to the trainer or next route stop")
-		CSU:Print("  /csu reset    - Reset icon, window and arrow positions")
+		CSU:Print("  /csu reset    - Reset icon, window, arrow and crafting bar positions")
 	else
 		if CSU.UI then CSU.UI:Toggle() end
 	end
