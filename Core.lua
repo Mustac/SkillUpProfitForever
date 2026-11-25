@@ -419,9 +419,8 @@ SlashCmdList["CHEAPSKILLUP"] = function(msg)
 	elseif cmd == "queue" then
 		if CSU.UI and CSU.UI.ToggleQueue then CSU.UI:ToggleQueue() end
 	elseif cmd == "bank" then
-		CSU.settings.includeBank = not CSU.settings.includeBank
-		CSU:Print("Count bank items: %s.", CSU.settings.includeBank and "ON" or "OFF")
-		CSU:Fire("QUEUE_CHANGED")
+		CSU:SetIncludeBank(not CSU.settings.includeBank)
+		CSU:Print("Mats From Bank: %s.", CSU.settings.includeBank and "ON" or "OFF")
 	elseif cmd == "ah" then
 		local h = tonumber((msg or ""):match("^%s*%S+%s+(%d+)"))
 		if h ~= 2 and h ~= 8 and h ~= 24 then

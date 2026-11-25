@@ -351,8 +351,24 @@ end
 -- Bag items mode: only use the items you have ticked in your bags
 ---------------------------------------------------------------------------
 
--- Item counts in the bags you carry (bank not included), cached until the bags change.
+-- Item counts in the bags you carry, plus the bank when Mats From Bank is on.
+-- Cached until the bags or the bank change.
 function Calc:GetBagCounts()
+	local bags = self:GetCarriedCounts()
+	if not (CSU.settings and CSU.settings.includeBank) then return bags end
+	local char = CSU:GetCharDB()
+	local bank = char and char.bank
+	if not bank then return bags end
+	local key = tostring(bags) .. ":" .. tostring(char.bankAt)
+	if self._withBank and self._withBankKey == key then return self._withBank end
+	local out = {}
+	for id, n in pairs(bags) do out[id] = n end
+	for id, n in pairs(bank) do out[id] = (out[id] or 0) + n end
+	self._withBank, self._withBankKey = out, key
+	return out
+end
+
+function Calc:GetCarriedCounts()
 	if self._bagCache then return self._bagCache end
 	local counts = {}
 	local C = C_Container

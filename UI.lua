@@ -940,8 +940,7 @@ function UI:CreateMainFrame()
 	local bankBtn = MakeFlatButton(op, 230, 22, "Count bank items: OFF", "default")
 	bankBtn:SetPoint("TOPLEFT", 10, sy - 18 - 22 - 10)
 	bankBtn:SetScript("OnClick", function()
-		CSU.settings.includeBank = not CSU.settings.includeBank
-		CSU:Fire("QUEUE_CHANGED")
+		CSU:SetIncludeBank(not CSU.settings.includeBank)
 	end)
 	bankBtn._onEnter = function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
@@ -1218,6 +1217,25 @@ function UI:CreateMainFrame()
 		GameTooltip:Show()
 	end
 	f.bagPill = bagPill
+
+	-- Mats From Bank: what's in your bank counts too (same switch as Count bank items)
+	local bankPill = MakeFlatButton(content, 160, 24, "Mats From Bank: OFF", "default")
+	bankPill:SetPoint("RIGHT", bagPill, "LEFT", -6, 0)
+	bankPill:SetScript("OnClick", function()
+		CSU:SetIncludeBank(not CSU.settings.includeBank)
+		UI.selectedRecipeID = nil
+	end)
+	bankPill._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		GameTooltip:AddLine("Mats From Bank (click to switch)", 1, 0.82, 0)
+		GameTooltip:AddLine("ON: mats in your bank count as yours, like the ones in your bags. Buy only asks for what you don't have anywhere, and Only Bag Items can use them too.", 1, 1, 1, true)
+		GameTooltip:AddLine("The bank is remembered from your last visit. When you open the bank, the Craft Queue takes what it needs into your bags.", 0.7, 0.7, 0.7, true)
+		if not CSU:HasSeenBank() then
+			GameTooltip:AddLine("Open your bank once so the addon can see it.", 1, 0.5, 0.4, true)
+		end
+		GameTooltip:Show()
+	end
+	f.bankPill = bankPill
 
 	local modeBtn = MakeFlatButton(content, 170, 24, "Mode: Cheapest", "gold")
 	modeBtn:SetPoint("TOPRIGHT", -12, -10)
@@ -3420,13 +3438,14 @@ function UI:CreateBagPanel()
 	local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	title:SetPoint("TOPLEFT", 12, -12)
 	title:SetText(CSU:Color("8a93a6", "BAG ITEMS"))
+	if UI.frame then UI.frame.bagTitle = title end
 
 	local help = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	help:SetPoint("TOPLEFT", 12, -34)
 	help:SetPoint("TOPRIGHT", -12, -34)
 	help:SetJustifyH("LEFT")
 	help:SetTextColor(0.65, 0.70, 0.78)
-	help:SetText("Mats in your bags for this profession. Ticked ones are used by Only Bag Items.")
+	help:SetText("Mats in your bags (and bank, with Mats From Bank on) for this profession. Ticked ones are used by Only Bag Items.")
 
 	local allBtn = MakeFlatButton(p, 60, 22, "All", "default")
 	allBtn:SetPoint("TOPLEFT", 10, -78)
@@ -3621,6 +3640,14 @@ function UI:Refresh()
 	else
 		f.bagPill:SetLabel("Mats From Bags: OFF")
 		f.bagPill:SetStyle("default")
+	end
+	if f.bankPill then
+		local bk = CSU.settings.includeBank
+		f.bankPill:SetLabel(bk and CSU:Color(CSU.COLORS.good, "Mats From Bank: ON") or "Mats From Bank: OFF")
+		f.bankPill:SetStyle(bk and "buy" or "default")
+	end
+	if f.bagTitle then
+		f.bagTitle:SetText(CSU:Color("8a93a6", CSU.settings.includeBank and "BAG + BANK ITEMS" or "BAG ITEMS"))
 	end
 	local grouped = CSU.settings.groupByType ~= false
 	f.groupBtn:SetLabel(grouped and "Group by type: ON" or "Group by type: OFF")
@@ -4346,8 +4373,7 @@ function UI:CreateQueueFrame()
 	local bankBtn = MakeFlatButton(q, 150, 24, "Count bank: OFF", "default")
 	bankBtn:SetPoint("BOTTOMLEFT", 10, 10)
 	bankBtn:SetScript("OnClick", function()
-		CSU.settings.includeBank = not CSU.settings.includeBank
-		CSU:Fire("QUEUE_CHANGED")
+		CSU:SetIncludeBank(not CSU.settings.includeBank)
 	end)
 	bankBtn._onEnter = function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")

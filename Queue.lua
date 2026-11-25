@@ -252,6 +252,7 @@ function Q:ScanBank()
 	local char = CSU:GetCharDB()
 	char.bank = counts
 	char.bankAt = time and time() or 0
+	if CSU.Calc then CSU.Calc._bagCache = nil end
 	self.bankSlots = slots
 	return true
 end
@@ -274,6 +275,17 @@ end
 function CSU:HasSeenBank()
 	local char = self.db and self:GetCharDB()
 	return char and char.bankAt ~= nil
+end
+
+-- Mats From Bank / Count bank items: one switch for the whole addon
+function CSU:SetIncludeBank(on)
+	self.settings.includeBank = on and true or false
+	if self.Calc then self.Calc._bagCache = nil end
+	if on and not self:HasSeenBank() then
+		self:Print("Mats From Bank is ON. Open your bank once so the addon can see what's in it.")
+	end
+	self:Fire("QUEUE_CHANGED", "settings")
+	self:Fire("FILTER_CHANGED")
 end
 
 -- Bank items count as yours only when Count bank is on
