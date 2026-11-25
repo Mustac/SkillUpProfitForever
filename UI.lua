@@ -2497,12 +2497,29 @@ local function FindSelectedEntry(list)
 	return list[1]
 end
 
-local function ConfigureBuyButton(btn, itemID, needQty, source)
+-- Nothing left to buy: say where the mats are (bags, mailbox, bank)
+local function HaveLabel(itemID, required)
+	local bags = CSU:GetBagCount(itemID)
+	required = required or 0
+	if bags >= required then return "In Bags" end
+	local mail = CSU:GetIncoming(itemID)
+	local bank = CSU.GetBankIncluded and CSU:GetBankIncluded(itemID) or 0
+	local parts = {}
+	if bags > 0 then table.insert(parts, "Bags") end
+	if mail > 0 then table.insert(parts, "Mail") end
+	if bank > 0 and bags + mail < required then table.insert(parts, "Bank") end
+	if #parts == 1 then return "In " .. parts[1] end
+	if #parts == 0 then return "In Bags" end
+	return table.concat(parts, " + ")
+end
+
+local function ConfigureBuyButton(btn, itemID, needQty, source, required)
 	btn.itemID = itemID
 	btn.qty = needQty
 
 	if needQty <= 0 then
-		btn:SetLabel(CSU:Color(CSU.COLORS.good, "In Bags"))
+		local where = HaveLabel(itemID, required)
+		btn:SetLabel(CSU:Color(where == "In Bags" and CSU.COLORS.good or CSU.COLORS.vendor, where))
 		btn:SetEnabledStyled(false, "default")
 		return
 	end
@@ -2839,6 +2856,7 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 	local batchTotal = 0
 	local batchBuy = 0
 	local bagUnits, bagValue, bagCost = 0, 0, 0
+	local unitsBags, unitsMail, unitsBank = 0, 0, 0
 	local vendorNeeded
 	local function unitOf(r) return r.unitPrice end
 	local batchComplete = true
@@ -2856,6 +2874,12 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 			local have = inBags + coming + fromBank
 			-- what the mats taken from your bags would sell for on the AH (vendor if no AH price)
 			local fromBags = math.min(have, reqTotal)
+			-- which part comes from where: bags first, then mailbox, then bank
+			local b = math.min(inBags, reqTotal)
+			local m = math.min(coming, reqTotal - b)
+			unitsBags = unitsBags + b
+			unitsMail = unitsMail + m
+			unitsBank = unitsBank + math.max(0, fromBags - b - m)
 			if fromBags > 0 then
 				local _, _, ahNet, vend = CSU.Prices:GetSellValue(r.itemID)
 				bagUnits = bagUnits + fromBags
@@ -2892,7 +2916,7 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 			end
 
 			rRow.searchBtn.itemID = r.itemID
-			ConfigureBuyButton(rRow.buyBtn, r.itemID, need, r.source)
+			ConfigureBuyButton(rRow.buyBtn, r.itemID, need, r.source, reqTotal)
 			if need > 0 and CSU.Prices.ahOpen and not CSU.Buyer:CanBuyFromMerchant(r.itemID) then
 				local st, exact, got = CSU.Buyer:GetState(r.itemID, need)
 				if (st == "buy" or st == "confirm") and exact then
@@ -2943,7 +2967,13 @@ function UI:RenderBuyCard(entry, isCheapest, prof)
 		-- MATERIALS
 		local matLines = { { "All mats", M(batchTotal) } }
 		if bagUnits > 0 then
-			table.insert(matLines, { string.format("From bags (%d)", bagUnits), M(bagCost) })
+			local whereParts = {}
+			if unitsBags > 0 then table.insert(whereParts, string.format("bags %d", unitsBags)) end
+			if unitsMail > 0 then table.insert(whereParts, string.format("mail %d", unitsMail)) end
+			if unitsBank > 0 then table.insert(whereParts, string.format("bank %d", unitsBank)) end
+			local whereLabel = (#whereParts == 1 and unitsBags > 0) and string.format("From bags (%d)", unitsBags)
+				or ("You have: " .. table.concat(whereParts, ", "))
+			table.insert(matLines, { whereLabel, M(bagCost) })
 			table.insert(matLines, { soft("  they'd sell on AH for"), soft(M(bagValue)) })
 		end
 		table.insert(matLines, { "To buy", batchBuy > 0 and M(batchBuy) or CSU:Color(CSU.COLORS.good, "nothing") })
@@ -4095,8 +4125,7 @@ function UI:RenderQueue()
 			r.cols.bank:SetText(bankTxt)
 			r.cols.mail:SetText(m.mail > 0 and tostring(m.mail) or CSU:Color(muted, "0"))
 			r.cols.buy:SetText(m.buy > 0 and CSU:Color(CSU.COLORS.warn, tostring(m.buy)) or CSU:Color(CSU.COLORS.good, "0"))
-			ConfigureBuyButton(r.buyBtn, m.itemID, m.buy)
-			if m.buy <= 0 then r.buyBtn:SetLabel(CSU:Color(CSU.COLORS.good, "Have all")) end
+			ConfigureBuyButton(r.buyBtn, m.itemID, m.buy, nil, m.need)
 			r:Show()
 		else
 			r:Hide()
