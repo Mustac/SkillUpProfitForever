@@ -30,6 +30,8 @@ CSU.DEFAULTS = {
 	layout = "classic",          -- classic | A | B | C | D (Options > Layout)
 	scale = 1,                   -- size of the whole addon (0.6 - 1.5)
 	queueShown = nil,            -- queue window open (back after login/reload); false = you closed it
+	viewMode = "full",           -- full | simple (small window: recipes + Craft buttons)
+	compactOnly = false,         -- simple view: only what you can make
 	castBar = true,              -- crafting bar (icon, crafts left, seconds); drag to move
 	castBarScale = 1,            -- size of the crafting bar
 	includeBank = false,         -- count bank items as yours (Craft Queue / Options)
@@ -408,6 +410,8 @@ SlashCmdList["CHEAPSKILLUP"] = function(msg)
 			end
 			CSU:Print("Scale: %d%% (60 to 150). Example: /csu scale 90", math.floor(CSU.UI:GetScale() * 100 + 0.5))
 		end
+	elseif cmd == "simple" then
+		if CSU.UI then CSU.UI:SetViewMode(CSU.UI.IsSimple() and "full" or "simple") end
 	elseif cmd == "news" then
 		if CSU.Notify then CSU.Notify:ShowWhatsNew(true) end
 	elseif cmd == "bar" then
@@ -454,6 +458,7 @@ SlashCmdList["CHEAPSKILLUP"] = function(msg)
 		CSU:Print("  /csu ah 2|8|24 - Auction length for the AH deposit in profit (now %dh)", CSU.Prices:GetAHHours())
 		CSU:Print("  /csu layout [classic|a|b|c|d] - Window layout (also in Options)")
 		CSU:Print("  /csu scale 90  - Size of the whole addon in % (also in Options)")
+		CSU:Print("  /csu simple   - Switch between the simple and the full window")
 		CSU:Print("  /csu news     - What's new in this version")
 		CSU:Print("  /csu bar      - Show the crafting bar so you can move it")
 		CSU:Print("  /csu queue    - Open the craft queue")

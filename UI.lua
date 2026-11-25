@@ -882,7 +882,17 @@ function UI:CreateMainFrame()
 		GameTooltip:Show()
 	end
 	f.queueHdr = queueHdr
-	headerSub:SetPoint("RIGHT", queueHdr, "LEFT", -8, 0)
+	local simpleBtn = MakeFlatButton(header, 64, 24, "Simple", "default")
+	simpleBtn:SetPoint("RIGHT", queueHdr, "LEFT", -6, 0)
+	simpleBtn:SetScript("OnClick", function() UI:SetViewMode("simple") end)
+	simpleBtn._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		GameTooltip:AddLine("Simple view", 1, 0.82, 0)
+		GameTooltip:AddLine("A small window with just your recipes, how many you can make, and a Craft / Enchant button on each. Full brings this window back.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end
+	f.simpleBtn = simpleBtn
+	headerSub:SetPoint("RIGHT", simpleBtn, "LEFT", -8, 0)
 
 	local op = MakeFrame("Frame", nil, f)
 	op:SetWidth(250)
@@ -2236,6 +2246,7 @@ function UI:ApplyScale()
 	if self.launcherBtn then self.launcherBtn:SetScale(s) end
 	if self.routeBox then self.routeBox:SetScale(s) end
 	if self.queueFrame then self.queueFrame:SetScale(s) end
+	if self.compact then self.compact:SetScale(s) end
 	if CSU.Arrow and CSU.Arrow.GetFrame then
 		local af = CSU.Arrow:GetFrame()
 		if af then af:SetScale(s) end
@@ -2355,6 +2366,10 @@ function UI:ApplyTheme()
 	end
 	if f and f.profBar then
 		f.profBar:SetBackdropColor(unpack(th.sidebar))
+	end
+	if self.compact then
+		self.compact:SetBackdropColor(unpack(th.bg))
+		self.compact:SetBackdropBorderColor(unpack(th.borderGold))
 	end
 	local q = self.queueFrame
 	if q then
@@ -3839,6 +3854,7 @@ function UI:Show(fromBlizzard)
 		if name then self:OpenProfession(name) end
 	end
 	self:Refresh()
+	if UI.IsSimple() then self:SetViewMode("simple") end -- you use the small window
 end
 
 -- In CheapSkillUp mode the hidden profession closes together with this window.
@@ -3860,9 +3876,10 @@ end
 
 -- X: hide the window into the icon, keeping the profession open
 function UI:Minimize()
-	if not self.frame then return end
+	if not self.frame and not self.compact then return end
 	self.minimizing = true
-	self.frame:Hide()
+	if self.frame then self.frame:Hide() end
+	if self.compact then self.compact:Hide() end
 	self.minimizing = nil
 	self.minimized = true
 	if not self.launcherBtn and self.CreateLauncherButton then self.CreateLauncherButton(true) end
@@ -3875,7 +3892,7 @@ function UI:UpdateLauncher()
 	local b = self.launcherBtn
 	if not (b and b.glow) then return end
 	if b.pulse and b.pulse:IsPlaying() then b.pulse:Stop() end
-	local onScreen = self.frame and self.frame:IsShown()
+	local onScreen = (self.frame and self.frame:IsShown()) or (self.compact and self.compact:IsShown())
 	if b.hover then
 		b.glow:SetAlpha(1)
 	elseif onScreen then
@@ -3886,7 +3903,7 @@ function UI:UpdateLauncher()
 end
 
 function UI:Toggle()
-	if self.frame and self.frame:IsShown() then
+	if (self.frame and self.frame:IsShown()) or (self.compact and self.compact:IsShown()) then
 		self:Minimize()
 	else
 		self:Show()
@@ -4496,9 +4513,337 @@ function UI:CraftQueueNext()
 	end
 end
 
+---------------------------------------------------------------------------
+-- Simple view: a small window with just the recipes, how many you can make, and a
+-- Craft / Enchant button on each. Toggle between Simple and Full; remembered.
+---------------------------------------------------------------------------
+local CW, CH = 290, 340
+local C_ROW_H = 20
+local DIFF_ORDER = { optimal = 1, medium = 2, easy = 3, trivial = 4 }
+
+function UI.IsSimple()
+	return CSU.settings and CSU.settings.viewMode == "simple"
+end
+
+-- how many you can make from what's in your bags
+local function CanMakeFromBags(e)
+	local n = math.huge
+	for _, r in ipairs(e.reagents or {}) do
+		n = math.min(n, math.floor(CSU:GetBagCount(r.itemID) / math.max(1, r.qty or 1)))
+	end
+	if n == math.huge then n = 0 end
+	return n
+end
+
+local function MissingText(e)
+	local parts = {}
+	for _, r in ipairs(e.reagents or {}) do
+		local have = CSU:GetBagCount(r.itemID)
+		if have < (r.qty or 1) then
+			local where = ""
+			if CSU:GetIncoming(r.itemID) > 0 then where = " (in your mailbox)"
+			elseif (CSU.GetBankCount and CSU:GetBankCount(r.itemID) or 0) > 0 then where = " (in your bank)" end
+			table.insert(parts, string.format("%dx %s%s", (r.qty or 1) - have, r.name or "?", where))
+		end
+	end
+	if #parts == 0 then return "Not enough materials in your bags." end
+	return "Not enough materials in your bags: missing " .. table.concat(parts, ", ")
+end
+
+function UI:CreateCompact()
+	if self.compact then return self.compact end
+	local c = MakeFrame("Frame", "SkillUpProfitSimple", UIParent)
+	local sz = CSU.settings.compactSize
+	c:SetSize((type(sz) == "table" and sz[1]) or CW, (type(sz) == "table" and sz[2]) or CH)
+	c:SetFrameStrata("FULLSCREEN_DIALOG")
+	c:SetFrameLevel(820)
+	if c.SetToplevel then c:SetToplevel(true) end
+	c:SetClampedToScreen(true)
+	c:SetMovable(true)
+	c:SetResizable(true)
+	if c.SetResizeBounds then c:SetResizeBounds(240, 180, 600, 1000) elseif c.SetMinResize then c:SetMinResize(240, 180) end
+	c:EnableMouse(true)
+	c:RegisterForDrag("LeftButton")
+	c:SetScript("OnDragStart", c.StartMoving)
+	c:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		local point, _, relPoint, x, y = self:GetPoint(1)
+		CSU.settings.compactPoint = { point, relPoint, x, y }
+	end)
+	local pt = CSU.settings.compactPoint
+	if type(pt) == "table" then
+		c:SetPoint(pt[1] or "CENTER", UIParent, pt[2] or "CENTER", pt[3] or 0, pt[4] or 0)
+	else
+		c:SetPoint("RIGHT", UIParent, "RIGHT", -260, 40)
+	end
+	c:SetBackdrop(FLAT_BACKDROP)
+	c:SetBackdropColor(unpack(PAL.bg))
+	c:SetBackdropBorderColor(unpack(PAL.borderGold))
+	c:SetScale(self:GetScale())
+
+	-- top: < Profession skill >   [Full] [x]
+	local close = MakeFlatButton(c, 22, 20, "x", "default")
+	close:SetPoint("TOPRIGHT", -6, -6)
+	close:SetScript("OnClick", function() UI:Minimize() end)
+	close._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("Hide into the icon (stays open for crafting)", 1, 0.82, 0)
+		GameTooltip:Show()
+	end
+	local full = MakeFlatButton(c, 44, 20, "Full", "gold")
+	full:SetPoint("RIGHT", close, "LEFT", -4, 0)
+	full:SetScript("OnClick", function() UI:SetViewMode("full") end)
+	full._onEnter = function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("Full view", 1, 0.82, 0)
+		GameTooltip:AddLine("Back to the big window with prices, profit, buying and the queue.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end
+	local prev = MakeFlatButton(c, 20, 20, "<", "default")
+	prev:SetPoint("TOPLEFT", 6, -6)
+	prev:SetScript("OnClick", function() UI:CompactSwitchProf(-1) end)
+	local nextB = MakeFlatButton(c, 20, 20, ">", "default")
+	nextB:SetPoint("RIGHT", full, "LEFT", -6, 0)
+	nextB:SetScript("OnClick", function() UI:CompactSwitchProf(1) end)
+	c.title = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	c.title:SetPoint("LEFT", prev, "RIGHT", 6, 0)
+	c.title:SetPoint("RIGHT", nextB, "LEFT", -6, 0)
+	c.title:SetJustifyH("CENTER")
+	if c.title.SetWordWrap then c.title:SetWordWrap(false) end
+
+	-- second line: can-make-only filter + hint
+	local only = MakeFlatButton(c, 120, 18, "Can make only", "default")
+	only:SetPoint("TOPLEFT", 6, -30)
+	only:SetScript("OnClick", function()
+		CSU.settings.compactOnly = not CSU.settings.compactOnly
+		UI:RenderCompact()
+	end)
+	c.only = only
+	c.hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	c.hint:SetPoint("LEFT", only, "RIGHT", 8, 0)
+	c.hint:SetPoint("RIGHT", -8, 0)
+	c.hint:SetJustifyH("RIGHT")
+	c.hint:SetText("Shift-click: all")
+
+	-- list
+	local list = CreateFrame("Frame", nil, c)
+	list:SetPoint("TOPLEFT", 6, -54)
+	list:SetPoint("BOTTOMRIGHT", -6, 18)
+	c.list = list
+	c.rows = {}
+	c.offset = 0
+	c:EnableMouseWheel(true)
+	c:SetScript("OnMouseWheel", function(self, delta)
+		self.offset = math.max(0, (self.offset or 0) - delta * 2)
+		UI:RenderCompact()
+	end)
+	c.empty = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	c.empty:SetPoint("TOPLEFT", list, "TOPLEFT", 4, -6)
+	c.empty:SetPoint("TOPRIGHT", list, "TOPRIGHT", -4, -6)
+	c.empty:SetJustifyH("LEFT")
+	c.empty:SetTextColor(0.7, 0.72, 0.76)
+	c.foot = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	c.foot:SetPoint("BOTTOMLEFT", 8, 4)
+
+	-- resize grip
+	local grip = CreateFrame("Button", nil, c)
+	grip:SetSize(14, 14)
+	grip:SetPoint("BOTTOMRIGHT", -2, 2)
+	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+	grip:SetScript("OnMouseDown", function() c:StartSizing("BOTTOMRIGHT") end)
+	grip:SetScript("OnMouseUp", function()
+		c:StopMovingOrSizing()
+		CSU.settings.compactSize = { math.floor(c:GetWidth() + 0.5), math.floor(c:GetHeight() + 0.5) }
+		UI:RenderCompact()
+	end)
+
+	c:SetScript("OnShow", function() UI:RenderCompact() UI:UpdateLauncher() end)
+	c:SetScript("OnHide", function() UI:UpdateLauncher() end)
+	c:Hide()
+	self.compact = c
+	return c
+end
+
+local function CompactRow(c, i)
+	local r = c.rows[i]
+	if r then return r end
+	r = CreateFrame("Button", nil, c.list)
+	r:SetHeight(C_ROW_H)
+	r:SetPoint("TOPLEFT", c.list, "TOPLEFT", 0, -(i - 1) * C_ROW_H)
+	r:SetPoint("TOPRIGHT", c.list, "TOPRIGHT", 0, -(i - 1) * C_ROW_H)
+	local bg = r:CreateTexture(nil, "BACKGROUND")
+	bg:SetAllPoints()
+	bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.035 or 0.012)
+	r.icon = r:CreateTexture(nil, "ARTWORK")
+	r.icon:SetSize(16, 16)
+	r.icon:SetPoint("LEFT", 2, 0)
+	r.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	r.btn = MakeFlatButton(r, 64, 18, "Craft", "default")
+	r.btn:SetPoint("RIGHT", 0, 0)
+	r.btn:SetScript("OnClick", function(self)
+		local e = r.entry
+		if not e then return end
+		local can = CanMakeFromBags(e)
+		if can <= 0 then
+			CSU:ShowError(MissingText(e))
+			return
+		end
+		if CSU.Enchant and CSU.Enchant:SlotFor(e) then
+			CSU.Enchant:Cast(e, OpenRecipeInProfessionFrame)
+		else
+			CraftRecipeFromWindow(e.recipeID, (IsShiftKeyDown and IsShiftKeyDown()) and can or 1)
+		end
+	end)
+	r.count = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	r.count:SetPoint("RIGHT", r.btn, "LEFT", -6, 0)
+	r.count:SetWidth(30)
+	r.count:SetJustifyH("RIGHT")
+	r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	r.name:SetPoint("LEFT", r.icon, "RIGHT", 5, 0)
+	r.name:SetPoint("RIGHT", r.count, "LEFT", -4, 0)
+	r.name:SetJustifyH("LEFT")
+	if r.name.SetWordWrap then r.name:SetWordWrap(false) end
+	r:SetScript("OnEnter", function(self)
+		local e = self.entry
+		if not e then return end
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		if e.outputItemID and GameTooltip.SetItemByID then
+			GameTooltip:SetItemByID(e.outputItemID)
+		else
+			GameTooltip:AddLine(e.name or "?", 1, 0.82, 0)
+		end
+		GameTooltip:AddLine(" ")
+		for _, rg in ipairs(e.reagents or {}) do
+			local have = CSU:GetBagCount(rg.itemID)
+			local ok = have >= (rg.qty or 1)
+			GameTooltip:AddDoubleLine(rg.name or "?", string.format("%d / %d", have, rg.qty or 1),
+				1, 1, 1, ok and 0.3 or 1, ok and 0.85 or 0.4, ok and 0.35 or 0.35)
+		end
+		GameTooltip:Show()
+	end)
+	r:SetScript("OnLeave", GameTooltip_Hide)
+	c.rows[i] = r
+	return r
+end
+
+function UI:RenderCompact()
+	local c = self.compact
+	if not (c and c:IsShown()) then return end
+	local profName = CSU.Calc.activeProfession
+	if not profName then
+		local profs = CSU.Calc:GetSidebarProfessions()
+		profName = profs[1] and profs[1].name
+	end
+	local list, prof = {}, nil
+	if profName then list, prof = CSU.Calc:GetRankedRecipes(profName, "normal") end
+	if prof then
+		c.title:SetText(string.format("%s  %s", CSU:Color(CSU.COLORS.title, prof.name),
+			CSU:Color(CSU.COLORS.muted, string.format("%d/%d", prof.skillLevel or 0, prof.maxSkillLevel or 0))))
+	else
+		c.title:SetText(CSU:Color(CSU.COLORS.muted, "No profession yet"))
+	end
+
+	-- what you can make first, then by colour (orange, yellow, green, grey), then A to Z
+	local rows = {}
+	for _, e in ipairs(list or {}) do
+		e._can = CanMakeFromBags(e)
+		if not CSU.settings.compactOnly or e._can > 0 then table.insert(rows, e) end
+	end
+	table.sort(rows, function(a, b)
+		local ca, cb = a._can > 0, b._can > 0
+		if ca ~= cb then return ca end
+		local da, db = DIFF_ORDER[a.difficulty] or 5, DIFF_ORDER[b.difficulty] or 5
+		if da ~= db then return da < db end
+		return (a.name or "") < (b.name or "")
+	end)
+
+	local only = CSU.settings.compactOnly
+	c.only:SetLabel(only and "Can make only: ON" or "Can make only: OFF")
+	c.only:SetStyle(only and "buy" or "default")
+
+	local fit = math.max(1, math.floor(((tonumber(c.list:GetHeight()) or (CH - 72))) / C_ROW_H))
+	local maxOff = math.max(0, #rows - fit)
+	if (c.offset or 0) > maxOff then c.offset = maxOff end
+	local off = c.offset or 0
+	for i = 1, math.max(fit, #c.rows) do
+		local e = (i <= fit) and rows[off + i] or nil
+		local r = (i <= fit) and CompactRow(c, i) or c.rows[i]
+		if e and r then
+			r.entry = e
+			r.icon:SetTexture(e.icon or 134400)
+			local _, hex = CSU.Calc:GetDifficultyMeta(e.difficulty)
+			r.name:SetText(CSU:Color(hex, e.name))
+			local can = e._can
+			r.count:SetText(can > 0 and CSU:Color(CSU.COLORS.good, "x" .. can) or CSU:Color(CSU.COLORS.muted, "0"))
+			local isEnchant = CSU.Enchant and CSU.Enchant:SlotFor(e)
+			r.btn:SetLabel(isEnchant and "Enchant" or "Craft")
+			r.btn:SetStyle(can > 0 and "gold" or "default")
+			r:Show()
+		elseif r then
+			r.entry = nil
+			r:Hide()
+		end
+	end
+	if #rows == 0 then
+		c.empty:SetText(only and "Nothing you can make from your bags right now." or "No recipes yet: open this profession once.")
+		c.empty:Show()
+	else
+		c.empty:Hide()
+	end
+	local canCount = 0
+	for _, e in ipairs(rows) do if e._can > 0 then canCount = canCount + 1 end end
+	c.foot:SetText(string.format("%d recipes, %d you can make", #rows, canCount))
+end
+
+function UI:CompactSwitchProf(step)
+	local profs = CSU.Calc:GetSidebarProfessions()
+	if #profs == 0 then return end
+	local cur = CSU.Calc.activeProfession
+	local idx = 1
+	for i, p in ipairs(profs) do if p.name == cur then idx = i end end
+	idx = ((idx - 1 + step) % #profs) + 1
+	local name = profs[idx].name
+	CSU.Calc.activeProfession = name
+	if UI.UseOwnWindow() and self.OpenProfession then self:OpenProfession(name) end
+	if self.compact then self.compact.offset = 0 end
+	self:RenderCompact()
+end
+
+-- Simple <-> Full
+function UI:SetViewMode(mode)
+	CSU.settings.viewMode = (mode == "simple") and "simple" or "full"
+	if mode == "simple" then
+		if self.frame and self.frame:IsShown() then
+			self.minimizing = true -- keep the profession open
+			self.frame:Hide()
+			self.minimizing = nil
+		end
+		self.minimized = false
+		self:CreateCompact():Show()
+		self:RenderCompact()
+	else
+		if self.compact then self.compact:Hide() end
+		self:Show()
+	end
+	self:UpdateLauncher()
+end
+
+local compactQueued = false
+function UI:QueueCompact()
+	if not (self.compact and self.compact:IsShown()) or compactQueued then return end
+	compactQueued = true
+	C_Timer.After(0.2, function()
+		compactQueued = false
+		UI:RenderCompact()
+	end)
+end
+
 function UI:Init()
 	CSU:On("PROFESSION_UPDATED", function() UI:QueueRefresh() end)
-	CSU:On("MAT_CHOICE_CHANGED", function() UI:QueueRefresh() UI:RenderQueue() end)
+	CSU:On("MAT_CHOICE_CHANGED", function() UI:QueueRefresh() UI:RenderQueue() UI:QueueCompact() end)
+	CSU:On("PROFESSION_UPDATED", function() UI:QueueCompact() end)
+	CSU:RegisterEvent("BAG_UPDATE_DELAYED", function() UI:QueueCompact() end)
 	CSU:On("PRICES_UPDATED", function() UI:QueueRefresh() end)
 	CSU:On("FILTER_CHANGED", function() UI:QueueRefresh() end)
 	CSU:On("BAGS_UPDATED", function() UI:QueueRefresh() end)

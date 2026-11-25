@@ -33,6 +33,7 @@ Prices come from its own AH scan, or from Auctionator or CraftProfit if you use 
 - `/csu ah 2|8|24` - auction length used for the AH deposit (8h by default)
 - `/csu layout [classic|a|b|c|d]` - window layout (also under Options)
 - `/csu scale 90` - size of the whole addon in % (also under Options)
+- `/csu simple` - switch between the simple and the full window
 - `/csu news` - what's new in this version
 - `/csu bar` - show the crafting bar so you can move it
 - `/csu queue` - open the craft queue

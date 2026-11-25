@@ -13,6 +13,7 @@ N.CHANGES = {
 		"Making those mats counts toward your skill points in the cost per point.",
 		"Enchanting: an Enchant button puts the enchant on gear with no enchant (bags or worn) or your own gear, one click per skill-up.",
 		"Craft Queue puts the mats you make yourself in front of the recipe that needs them.",
+		"Simple view: a small window with just your recipes, how many you can make, and a Craft / Enchant button on each. Switch with the Simple / Full buttons.",
 		"Crafting bar: icon, seconds and crafts left. Drag it anywhere; turn it on or off and size it in Options.",
 		"Clear errors on screen: missing materials, no anvil, no cooking fire, and so on.",
 		"Graphite theme: dark grey instead of black. Mats bought on the AH show In Mail until you take them out.",

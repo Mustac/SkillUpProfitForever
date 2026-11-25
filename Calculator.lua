@@ -853,7 +853,7 @@ function Calc:EvaluateRecipe(rec, currentSkill)
 end
 
 -- Returns sorted list of evaluated recipes + profession metadata
-function Calc:GetRankedRecipes(profName)
+function Calc:GetRankedRecipes(profName, modeOverride)
 	local saved = self:GetProfessionData(profName)
 	if not saved then return {}, nil end
 
@@ -879,7 +879,7 @@ function Calc:GetRankedRecipes(profName)
 		end
 	end
 
-	local mode = self:GetMode()
+	local mode = modeOverride or self:GetMode()
 	local list = {}
 	self.evalProf = saved.name
 	for _, rec in pairs(prof.recipes or {}) do

@@ -6,6 +6,7 @@
 - Making those mats counts toward your skill points in the cost per point.
 - **Enchanting**: an **Enchant** button puts the enchant on gear with no enchant (in your bags or worn), or on your own gear (asks for a second click). One click per skill-up.
 - **Craft Queue** puts the mats you make yourself in front of the recipe that needs them.
+- **Simple view**: a small window with just your recipes, how many you can make from your bags, and a Craft / Enchant button on each (Shift-click crafts all). Switch with Simple / Full; remembered. `/csu simple`.
 - **Crafting bar**: recipe icon, crafts left and seconds. Drag it anywhere; on/off and size in Options (`/csu bar` to move it).
 - **Clear errors**: no materials, no anvil, no cooking fire and other crafting errors show in red above the crafting bar and on the window. Craft (0) tells you what's missing.
 - **What's new** window after an update (`/csu news`), and a notice when someone in your guild or group has a newer version.
