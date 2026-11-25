@@ -833,10 +833,9 @@ function UI:CreateMainFrame()
 	end)
 	winBtn._onEnter = function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-		GameTooltip:AddLine("Profession window", 1, 0.82, 0)
-		GameTooltip:AddLine("SkillUp & Profit: crafting works from here. Blizzard's window stays open but hidden.", 1, 1, 1, true)
-		GameTooltip:AddLine("Blizzard: the normal profession window.", 1, 1, 1, true)
-		GameTooltip:AddLine("Click to switch.", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine("Switch to Blizzard's window", 1, 0.82, 0)
+		GameTooltip:AddLine("Only one of the two is on screen. This window goes to its icon and Blizzard's profession window opens.", 1, 1, 1, true)
+		GameTooltip:AddLine("The SkillUp & Profit button on Blizzard's window switches back.", 0.6, 0.6, 0.6, true)
 		GameTooltip:Show()
 	end
 	f.winBtn = winBtn
@@ -3626,7 +3625,7 @@ function UI:Refresh()
 	f.btnGreen:UpdateVisual()
 
 	local own = UI.UseOwnWindow()
-	f.winBtn:SetLabel(own and "Window: SkillUp & Profit" or "Window: Blizzard")
+	f.winBtn:SetLabel(own and "Blizzard Window" or "Window: Blizzard")
 	f.winBtn:SetStyle(own and "gold" or "default")
 
 
@@ -3830,6 +3829,9 @@ function UI:ApplyBlizzardWindowMode()
 			UI:ApplyBlizzardWindowMode()
 			if UseOwnWindow() and not pf._csuQuiet and not (UI.frame and UI.frame:IsShown()) then
 				UI:Show(true)
+			elseif not UseOwnWindow() and not pf._csuQuiet then
+				-- only one of the two on screen: Blizzard's is up, so the addon's goes to its icon
+				if (UI.frame and UI.frame:IsShown()) or (UI.compact and UI.compact:IsShown()) then UI:Minimize() end
 			end
 		end)
 		pf:HookScript("OnHide", function()
@@ -3862,6 +3864,7 @@ function UI:ApplyBlizzardWindowMode()
 		pf._csuNeedsReopen = pf:IsShown() and true or nil
 		if UpdateUIPanelPositions then pcall(UpdateUIPanelPositions, pf) end
 	end
+	if UI.SyncSwapButtons then UI:SyncSwapButtons() end
 end
 
 local EnsureProfessionButton
@@ -3933,6 +3936,11 @@ function UI:OpenProfession(profName)
 end
 
 function UI:Show(fromBlizzard)
+	if not UseOwnWindow() and UI.BlizzardVisible and UI.BlizzardVisible() then
+		-- only one of the two on screen: switching to this window hides Blizzard's
+		CSU.settings.craftWindow = "csu"
+		self:ApplyBlizzardWindowMode()
+	end
 	self:CreateMainFrame()
 	self.minimized = false
 	self:UpdateLauncher()
@@ -4009,20 +4017,40 @@ end
 -- Quick-Swap Button on Blizzard Profession Windows (ProfessionsFrame / TradeSkillFrame / CraftFrame)
 ---------------------------------------------------------------------------
 
+-- Blizzard's window counts as "on screen" only when it isn't hidden by the addon
+local function BlizzardVisible(pf)
+	pf = pf or _G.ProfessionsFrame
+	return pf ~= nil and pf:IsShown() and not pf._csuHidden
+end
+UI.BlizzardVisible = BlizzardVisible
+
+function UI:SyncSwapButtons()
+	for _, pf in ipairs({ _G.ProfessionsFrame, _G.TradeSkillFrame, _G.CraftFrame }) do
+		local b = pf and pf._csuSwapBtn
+		if b then
+			if BlizzardVisible(pf) and not (CSU.settings and CSU.settings.showProfButton == false) then b:Show() else b:Hide() end
+		end
+	end
+end
+
 local function AttachSwapButton(pf, btnName, ox, oy)
 	if not pf or pf._csuSwapBtn then return end
-	local btn = CreateFrame("Button", btnName, pf, "UIPanelButtonTemplate")
-	btn:SetSize(128, 22)
+	-- on UIParent, so Blizzard's own title bar can't cover it
+	local btn = CreateFrame("Button", btnName, UIParent, "UIPanelButtonTemplate")
+	btn:SetSize(128, 20)
 	btn:SetText("SkillUp & Profit")
-	btn:SetPoint("TOPRIGHT", pf, "TOPRIGHT", ox or -34, oy or -28)
-	btn:SetFrameLevel((pf:GetFrameLevel() or 1) + 20)
+	btn:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -28, -2)
+	btn:SetFrameStrata("DIALOG")
+	btn:SetFrameLevel(50)
 	btn:SetScript("OnClick", function()
 		UI:SetWindowMode("csu")
 	end)
+	pf:HookScript("OnShow", function() if C_Timer then C_Timer.After(0, function() UI:SyncSwapButtons() end) end UI:SyncSwapButtons() end)
+	pf:HookScript("OnHide", function() UI:SyncSwapButtons() end)
 	btn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:AddLine("SkillUp & Profit Forever", 1, 0.82, 0)
-		GameTooltip:AddLine("Swap to SkillUp & Profit window to find the cheapest skill-ups, best profit, and one-click mat buying.", 1, 1, 1, true)
+		GameTooltip:AddLine("Switch to the SkillUp & Profit window. Blizzard's window goes away; the button in the addon window brings it back.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	btn:SetScript("OnLeave", GameTooltip_Hide)
@@ -4035,16 +4063,14 @@ EnsureProfessionButton = function()
 	if _G.ProfessionsFrame then
 		local b = AttachSwapButton(_G.ProfessionsFrame, "CheapSkillUpProfButton", -34, -28)
 		if b then UI.profToggleBtn = b end
-		if _G.ProfessionsFrame._csuSwapBtn then _G.ProfessionsFrame._csuSwapBtn:Show() end
 	end
 	if _G.TradeSkillFrame then
 		AttachSwapButton(_G.TradeSkillFrame, "CheapSkillUpTradeSkillButton", -34, -28)
-		if _G.TradeSkillFrame._csuSwapBtn then _G.TradeSkillFrame._csuSwapBtn:Show() end
 	end
 	if _G.CraftFrame then
 		AttachSwapButton(_G.CraftFrame, "CheapSkillUpCraftButton", -34, -28)
-		if _G.CraftFrame._csuSwapBtn then _G.CraftFrame._csuSwapBtn:Show() end
 	end
+	UI:SyncSwapButtons()
 end
 
 ---------------------------------------------------------------------------
